@@ -1,0 +1,1221 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <title>Three Pillars — v1</title>
+
+  <!-- React (UMD) -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <style>
+    :root{
+      --bg:#111;
+      --panel:#151515;
+      --panel2:#1b1b1b;
+      --border:#333;
+      --text:#eee;
+      --muted:#bdbdbd;
+      --accent:#ff6a00;
+      --accent2:#ff7f24;
+      --good:#22c55e;
+      --warn:#f59e0b;
+      --bad:#ef4444;
+    }
+    body{ margin:0; padding:18px; background:var(--bg); color:var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    .wrap{ max-width: 840px; margin:0 auto; }
+    h1{ margin:0; text-align:center; font-weight:900; letter-spacing:.2px; }
+    .sub{ text-align:center; margin:10px 0 18px; color:var(--muted); font-size: 13px;}
+    .row{ display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
+    .btn{ padding:9px 12px; border-radius:10px; border:1px solid var(--border); background:#222; color:var(--text); cursor:pointer; font-weight:700; font-size:13px; }
+    .btn:hover{ border-color:#444; }
+    .btn.primary{ background:var(--accent); border-color: transparent; color:white; }
+    .btn.ghost{ background:transparent; }
+    .pill{ display:inline-block; padding:3px 8px; border-radius:999px; border:1px solid var(--border); font-size:12px; color:var(--muted); }
+    .section{ margin:14px 0; border:1px solid var(--border); border-radius:14px; overflow:hidden; background:var(--panel); }
+    .sectionHead{ padding:12px 14px; background:var(--panel2); display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .sectionTitle{ font-weight:900; font-size:16px; }
+    .sectionBody{ padding:12px 14px; }
+    .small{ font-size:12px; color:var(--muted); line-height:1.35; }
+    .list{ margin:10px 0 0; padding:0; list-style:none; display:flex; flex-direction:column; gap:8px; }
+    .card{ border:1px solid var(--border); background:#121212; border-radius:12px; padding:10px 10px; display:flex; justify-content:space-between; align-items:center; gap:10px; }
+    .kbd{ display:inline-block; padding:.1rem .35rem; border-radius:.5rem; border:1px solid var(--border); font-size:.75rem; color:var(--muted); }
+    a{ color:#ffd3b4; }
+    .timer{ font-size:26px; font-weight:900; letter-spacing:.5px; }
+    .split{ display:flex; gap:10px; flex-wrap:wrap; }
+    .grow{ flex: 1 1 260px; }
+    .right{ text-align:right; }
+  </style>
+</head>
+
+<body>
+  <div id="root" class="wrap"></div>
+
+  <script type="text/babel">
+    const { useEffect, useMemo, useRef, useState } = React;
+
+    /**********************
+     * Helpers
+     **********************/
+    const shuffleArray = (array) => {
+      const arr = [...array];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    };
+    const ensureNoAdjacentDuplicateExercises = (list) => {
+      if (list.length < 2) return list;
+      let arr = [...list];
+      const hasAdjacentDupes = (a) => a.some((it, idx) => idx > 0 && it.name === a[idx - 1].name);
+      let attempts = 0;
+      while (hasAdjacentDupes(arr) && attempts < 20) { arr = shuffleArray(arr); attempts++; }
+      if (hasAdjacentDupes(arr)) {
+        for (let i = 0; i < arr.length - 1; i++) {
+          if (arr[i].name === arr[i + 1].name) {
+            for (let j = i + 2; j < arr.length; j++) {
+              if (arr[j].name !== arr[i].name) {
+                [arr[i + 1], arr[j]] = [arr[j], arr[i + 1]];
+                break;
+              }
+            }
+          }
+        }
+      }
+      return arr;
+    };
+    const fmtClock = (seconds) => {
+      const m = Math.floor(seconds / 60);
+      const s = seconds % 60;
+      return `${m}:${s < 10 ? "0" : ""}${s}`;
+    };
+    const beep = (freq=880, dur=0.09, vol=0.08) => {
+      try{
+        const ctx = new (window.AudioContext||window.webkitAudioContext)();
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.frequency.value = freq; o.type = "sine";
+        g.gain.value = vol;
+        o.connect(g); g.connect(ctx.destination);
+        o.start();
+        setTimeout(()=>{ o.stop(); ctx.close(); }, dur*1000);
+      }catch(e){}
+    };
+    const tripleBeep = () => {
+      beep(880,0.08);
+      setTimeout(()=>beep(880,0.08), 130);
+      setTimeout(()=>beep(880,0.08), 260);
+    };
+
+    /**********************
+     * LocalStorage keys
+     **********************/
+    const LS = {
+      // Hellfire
+      HISTORY: "kbInfernoHistory",
+      LAST_NAMES: "kbInfernoLastWorkout",
+      ACTIVE: "kbInfernoActiveWorkout",
+
+      // Flowing
+      FLOW_ACTIVE: "kbFlowActive",
+      FLOW_LAST_NAMES: "kbFlowLastNames",
+
+      // Three Pillars rotation
+      LAST_COMPLETED: "kbThreePillars_lastCompleted", // {date, mode} mode in ["strength","flow","hellfire"]
+
+      // Flow -> Hellfire (one-time subtle bias)
+      FLOW_TO_HF: "kbFlowToHellfireOnce" // { doubleCat, ballistic, grind, used:false }
+    };
+
+    const todayKey = () => {
+      const d = new Date();
+      const y = d.getFullYear();
+      const m = String(d.getMonth()+1).padStart(2,"0");
+      const dd = String(d.getDate()).padStart(2,"0");
+      return `${y}-${m}-${dd}`;
+    };
+
+    const ROTATION = ["strength","flow","hellfire"]; // H -> L -> M
+
+    const getSuggestedMode = () => {
+      const raw = localStorage.getItem(LS.LAST_COMPLETED);
+      const t = todayKey();
+      if(!raw) return "strength";
+      try{
+        const last = JSON.parse(raw);
+        if(last?.date === t) return last?.mode || "strength";
+        const idx = ROTATION.indexOf(last?.mode);
+        if(idx === -1) return "strength";
+        return ROTATION[(idx+1) % ROTATION.length];
+      }catch(e){
+        return "strength";
+      }
+    };
+
+    const markCompleted = (mode) => {
+      localStorage.setItem(LS.LAST_COMPLETED, JSON.stringify({ date: todayKey(), mode }));
+    };
+
+    /**********************
+     * Hellfire data (from your existing Hybrid v2)
+     **********************/
+    const testWorkout = [
+      { name: "Two-arm Swing", reps: 30, pattern: "hinge", unilateral: false, video: "https://www.youtube.com/watch?v=1cVT3ee9mgU" },
+      { name: "Deadlift", reps: 25, pattern: "hinge", unilateral: false, video: "https://www.youtube.com/watch?v=l6gDwf3xC6s" },
+      { name: "Snatch", reps: 50, pattern: "pull", unilateral: true, video: "https://www.youtube.com/watch?v=QsuJ6973OFc" },
+      { name: "Goblet Squat", reps: 35, pattern: "squat", unilateral: false, video: "https://www.youtube.com/shorts/dBnNCOtuGNQ" },
+      { name: "One-arm Swing", reps: 60, pattern: "hinge", unilateral: true, video: "https://www.youtube.com/watch?v=UYBKrK1y6ww" },
+      { name: "Russian Twist", reps: 40, pattern: "core", unilateral: false, video: "https://www.youtube.com/watch?v=7XUglHKRyMo" },
+      { name: "Clean & Press", reps: 30, pattern: "hybrid", unilateral: true, video: "https://www.youtube.com/watch?v=km3f8_rpDdg" },
+      { name: "Two-arm Swing", reps: 30, pattern: "hinge", unilateral: false, video: "https://www.youtube.com/watch?v=1cVT3ee9mgU" }
+    ];
+
+    const exerciseDatabase = {
+      beginner: {
+        squat: [
+          { name: "Goblet Squat", type: "Grind", stimulus: 1.3, unilateral: false, video: "https://www.youtube.com/shorts/dBnNCOtuGNQ" },
+          { name: "Single Side Front Squat", type: "Grind", stimulus: 1.3, unilateral: true, video: "https://www.youtube.com/watch?v=SlPwjU6I9gk" },
+          { name: "Jump Squat", type: "Ballistic", stimulus: 1.8, unilateral: false, video: "https://www.youtube.com/watch?v=v3prQwHewL0" }
+        ],
+        hinge: [
+          { name: "Deadlift (sumo/standard)", type: "Grind", stimulus: 0.8, unilateral: false, video: "https://www.youtube.com/watch?v=xFU5zTZgiyE" },
+          { name: "B-stance Deadlift", type: "Grind", stimulus: 1.1, unilateral: true, video: "https://www.youtube.com/shorts/8-mW9b4WbRo" },
+          { name: "Two-arm Swing", type: "Ballistic", stimulus: 1.1, unilateral: false, video: "https://www.youtube.com/watch?v=1cVT3ee9mgU" },
+          { name: "Glute Bridge", type: "Grind", stimulus: 1.0, unilateral: false, video: "https://www.youtube.com/shorts/ULl7xM2yWgo" }
+        ],
+        push: [
+          { name: "Floor Press", type: "Grind", stimulus: 1.2, unilateral: true, video: "https://www.youtube.com/shorts/1QMCUbRkQFA" },
+          { name: "Half-Kneeling Press", type: "Grind", stimulus: 1.4, unilateral: true, video: "https://www.youtube.com/shorts/n0peUzKZ-PU" },
+          { name: "Push Press", type: "Ballistic", stimulus: 1.3, unilateral: true, video: "https://www.youtube.com/watch?v=CCqru4q9RK0" },
+          { name: "Military Press", type: "Grind", stimulus: 1.6, unilateral: true, video: "https://www.youtube.com/shorts/oYubnI4aXD8" }
+        ],
+        pull: [
+          { name: "Bent-over Row", type: "Grind", stimulus: 1.4, unilateral: true, video: "https://www.youtube.com/shorts/pvRXtyBkO-s" },
+          { name: "Pull-over", type: "Grind", stimulus: 1.2, unilateral: false, video: "https://www.youtube.com/shorts/HEV0UZIlEag" },
+          { name: "Clean", type: "Ballistic", stimulus: 1.4, unilateral: true, video: "https://www.youtube.com/shorts/xQb9Tc3iQpI" },
+          { name: "One-arm High Pull", type: "Ballistic", stimulus: 1.4, unilateral: true, video: "https://www.youtube.com/watch?v=mP1BHxBeAEM" }
+        ],
+        core: [
+          { name: "Russian Twist", type: "Ballistic", stimulus: 0.7, unilateral: false, video: "https://www.youtube.com/watch?v=7XUglHKRyMo" },
+          { name: "Half-Kneeling Windmill", type: "Grind", stimulus: 1.2, unilateral: true, video: "https://www.youtube.com/shorts/BfYW9PI5LS8" },
+          { name: "Supine Get-up Sit-up", type: "Grind", stimulus: 1.5, unilateral: true, video: "https://www.youtube.com/watch?v=dv_nNf43Qck" },
+          { name: "Front Rack Hold / Carry", type: "Grind", stimulus: 0.5, unilateral: false, video: "https://www.youtube.com/watch?v=jumVlXfY1Pc" }
+        ],
+        hybrid: [
+          { name: "Clean & Squat", type: "Grind", stimulus: 2.5, unilateral: true, video: "https://www.youtube.com/watch?v=iSkQEUoC22Q" },
+          { name: "Squat & Press", type: "Ballistic", stimulus: 2.0, unilateral: false, video: "https://www.youtube.com/watch?v=7E0o5Hv8TMk" },
+          { name: "Clean & Press", type: "Grind", stimulus: 2.0, unilateral: true, video: "https://www.youtube.com/watch?v=km3f8_rpDdg" },
+          { name: "Clean & Push Press", type: "Ballistic", stimulus: 2.0, unilateral: true, video: "https://www.youtube.com/shorts/HWHJW0ivos8" }
+        ]
+      },
+      advanced: {
+        squat: [
+          { name: "Side Lunge / Cossack", type: "Grind", stimulus: 1.5, unilateral: true, video: "https://www.youtube.com/watch?v=WG1a97zsGdw" },
+          { name: "Bulgarian Split Squat", type: "Grind", stimulus: 1.5, unilateral: true, video: "https://www.youtube.com/watch?v=JQQpO06hUvI" },
+          { name: "Step-up / Pistol (with box)", type: "Grind", stimulus: 1.6, unilateral: true, video: "https://www.youtube.com/watch?v=0DbaQ490LMs" }
+        ],
+        hinge: [
+          { name: "One-arm Swing", type: "Ballistic", stimulus: 1.2, unilateral: true, video: "https://www.youtube.com/watch?v=UYBKrK1y6ww" },
+          { name: "Hand-to-Hand Swing", type: "Ballistic", stimulus: 1.4, unilateral: false, video: "https://www.youtube.com/shorts/lQqR4wzdMak" }
+        ],
+        push: [
+          { name: "Top-Down Press", type: "Grind", stimulus: 2.2, unilateral: true, video: "https://www.youtube.com/watch?v=a9zEt8d-DYU" },
+          { name: "Push Jerk / VPP", type: "Ballistic", stimulus: 1.4, unilateral: true, video: "https://www.youtube.com/shorts/5lSuYCma88w" }
+        ],
+        pull: [
+          { name: "Renegade Row", type: "Grind", stimulus: 1.3, unilateral: true, video: "https://www.youtube.com/watch?v=7l03NoMzGp4" },
+          { name: "Snatch", type: "Ballistic", stimulus: 1.6, unilateral: true, video: "https://www.youtube.com/watch?v=QsuJ6973OFc" }
+        ],
+        core: [
+          { name: "Turkish Get-up", type: "Grind", stimulus: 3.5, unilateral: true, special: "tgu", video: "https://www.youtube.com/watch?v=sgd8n917Zv0" },
+          { name: "Windmill", type: "Grind", stimulus: 1.8, unilateral: true, video: "https://www.youtube.com/shorts/EZWHnzAjctU" }
+        ],
+        hybrid: [
+          { name: "Snatch & Press", type: "Grind", stimulus: 2.0, unilateral: true, video: "https://www.youtube.com/shorts/icAh8ZEjNx8" },
+          { name: "Clean → Press → Squat", type: "Grind", stimulus: 2.5, unilateral: true, video: "https://www.youtube.com/watch?v=Fsd4VcFO094" }
+        ]
+      }
+    };
+
+    /**********************
+     * Flowing 2.2 DB
+     **********************/
+    const FLOW_DB = {
+      Push: [
+        {name:"Military Press", type:"grind"},
+        {name:"Push Press", type:"ballistic"},
+        {name:"Floor Press", type:"grind"},
+        {name:"Half Kneeling Press", type:"grind"},
+        {name:"Bent Press", type:"tech"},
+        {name:"Push-up", type:"grind"}
+      ],
+      Pull: [
+        {name:"Bent Over Row", type:"grind"},
+        {name:"Renegade Row", type:"grind"},
+        {name:"High Pull", type:"ballistic"},
+        {name:"Snatch (to OH)", type:"ballistic"},
+        {name:"Rotational Clean", type:"ballistic"},
+        {name:"Pullover", type:"grind"}
+      ],
+      Squat: [
+        {name:"Goblet Squat", type:"grind"},
+        {name:"Single Side Front Squat", type:"grind"},
+        {name:"Cossack Squat", type:"grind"},
+        {name:"Reverse Lunge", type:"grind"},
+        {name:"Front Lunge", type:"grind"},
+        {name:"Jump Squat", type:"ballistic"}
+      ],
+      Hinge: [
+        {name:"One-arm Swing", type:"ballistic"},
+        {name:"Two-arm Swing", type:"ballistic"},
+        {name:"Hand-to-Hand Swing", type:"ballistic"},
+        {name:"Side Swing", type:"ballistic"},
+        {name:"B-stance Deadlift", type:"grind"},
+        {name:"Single Leg Deadlift", type:"grind"},
+        {name:"Tactical Lunge (Gate Pass)", type:"tech"}
+      ]
+    };
+
+    const rInt = (n) => Math.floor(Math.random()*n);
+    const rChoice = (arr) => arr[rInt(arr.length)];
+
+    function generateFlow22({count=5, avoidNames=[]}){
+      const baseCats = ["Push","Pull","Squat","Hinge"];
+      const cap = Math.max(4, Math.min(6, count));
+      const doubleCat = rChoice(baseCats);
+
+      const plan = [...baseCats];
+      if(cap >= 5) plan.push(doubleCat);
+      if(cap === 6){
+        const remaining = baseCats.filter(c => c !== doubleCat);
+        plan.push(rChoice(remaining));
+      }
+
+      const pickFromCat = (cat, triesAvoid=true) => {
+        const pool = FLOW_DB[cat] || [];
+        if(!pool.length) return null;
+        if(triesAvoid){
+          const filtered = pool.filter(x => !avoidNames.includes(x.name));
+          if(filtered.length) return { ...rChoice(filtered), cat };
+        }
+        return { ...rChoice(pool), cat };
+      };
+
+      let out = [];
+      let seen = new Set();
+
+      for(const cat of plan){
+        let ex = pickFromCat(cat, true);
+        let guard = 0;
+        while(ex && seen.has(ex.name) && guard < 10){
+          ex = pickFromCat(cat, false);
+          guard++;
+        }
+        if(ex && !seen.has(ex.name)){
+          seen.add(ex.name);
+          out.push(ex);
+        }
+      }
+
+      while(out.length < cap){
+        const cat = rChoice(baseCats);
+        let ex = pickFromCat(cat, true);
+        let guard = 0;
+        while(ex && (seen.has(ex.name) || out.filter(o=>o.cat===cat).length>=2) && guard < 12){
+          ex = pickFromCat(cat, false);
+          guard++;
+        }
+        if(ex && !seen.has(ex.name) && out.filter(o=>o.cat===cat).length<2){
+          seen.add(ex.name);
+          out.push(ex);
+        }else{
+          break;
+        }
+      }
+
+      const hasGrind = out.some(o => o.type === "grind");
+      const hasBallistic = out.some(o => o.type === "ballistic");
+      if(!(hasGrind && hasBallistic)){
+        const need = hasGrind ? "ballistic" : "grind";
+        for(let i=0;i<out.length;i++){
+          const cat = out[i].cat;
+          const pool = (FLOW_DB[cat]||[]).filter(x => x.type === need && !seen.has(x.name) && !avoidNames.includes(x.name));
+          if(pool.length){
+            seen.delete(out[i].name);
+            out[i] = { ...rChoice(pool), cat };
+            seen.add(out[i].name);
+            break;
+          }
+        }
+      }
+
+      out = shuffleArray(out);
+      const ballistic = out.filter(x => x.type === "ballistic").length;
+      const grind = out.filter(x => x.type === "grind").length;
+      return { flow: out, doubleCat, ballistic, grind };
+    }
+
+    /**********************
+     * Wakelock
+     **********************/
+    async function requestWakeLock(setState){
+      try{
+        if("wakeLock" in navigator){
+          const lock = await navigator.wakeLock.request("screen");
+          setState({ supported:true, active:true, lock });
+          lock.addEventListener("release", ()=>setState(prev=>({...prev, active:false, lock:null})));
+        }else{
+          setState({ supported:false, active:false, lock:null });
+        }
+      }catch(e){
+        setState({ supported:true, active:false, lock:null });
+      }
+    }
+    async function releaseWakeLock(wl, setState){
+      try{ if(wl?.lock){ await wl.lock.release(); } }catch(e){}
+      setState(prev=>({...prev, active:false, lock:null}));
+    }
+
+    /**********************
+     * Strength as a Skill (Big Six)
+     **********************/
+    const BIG_SIX = [
+      { key:"dfs", name:"Double KB Front Squat", target:"3–5 × 3–5" },
+      { key:"dcl", name:"Double Clean", target:"3–5 × 3" },
+      { key:"sw",  name:"Swing (two-arm of one-arm)", target:"3–5 × 5" },
+      { key:"sn",  name:"Snatch", target:"3–5 × 3 / arm" },
+      { key:"mp",  name:"Military Press", target:"3–5 × 3–5 / arm" },
+      { key:"tgu", name:"Get Up", target:"3–5 singles / kant" },
+    ];
+
+    function App(){
+      // Mode UI
+      const [mode, setMode] = useState("auto"); // auto | strength | flow | hellfire
+      const [suggested, setSuggested] = useState(getSuggestedMode());
+
+      const effectiveMode = useMemo(()=> mode === "auto" ? suggested : mode, [mode, suggested]);
+
+      // ===== Strength state =====
+      const [strengthOrder, setStrengthOrder] = useState(BIG_SIX.map(x=>x.key));
+      const [strengthSets, setStrengthSets] = useState(Object.fromEntries(BIG_SIX.map(x=>[x.key, 0])));
+
+      // ===== Hellfire state =====
+      const [level, setLevel] = useState("beginner");
+      const [totalSU, setTotalSU] = useState(300);
+      const [testMode, setTestMode] = useState(false);
+      const [workout, setWorkout] = useState([]);
+      const [history, setHistory] = useState([]);
+      const [expandedIndex, setExpandedIndex] = useState(null);
+      const [openExercise, setOpenExercise] = useState(null);
+      const [lastWorkoutExercises, setLastWorkoutExercises] = useState([]);
+
+      // Hellfire timer
+      const [hfTimerRunning, setHfTimerRunning] = useState(false);
+      const [hfTime, setHfTime] = useState(0);
+      const hfIntervalRef = useRef(null);
+
+      // ===== Flow state =====
+      const [flowCount, setFlowCount] = useState(5);
+      const [flowList, setFlowList] = useState([]);
+      const [flowDoubleCat, setFlowDoubleCat] = useState(null);
+      const [flowTimerPreset, setFlowTimerPreset] = useState(10*60);
+      const [flowRemaining, setFlowRemaining] = useState(10*60);
+      const [flowRunning, setFlowRunning] = useState(false);
+      const flowIntervalRef = useRef(null);
+
+      // Segment 2 timer (per-side)
+      const [s2Phase, setS2Phase] = useState("idle"); // idle | right | rest1 | left | rest2
+      const [s2Remaining, setS2Remaining] = useState(60);
+      const [s2Running, setS2Running] = useState(false);
+      const s2IntervalRef = useRef(null);
+
+      const [beepsOn, setBeepsOn] = useState(true);
+      const [wl, setWl] = useState({ supported:true, active:false, lock:null });
+
+      // INIT
+      useEffect(()=>{
+        setHistory(JSON.parse(localStorage.getItem(LS.HISTORY) || "[]"));
+        setLastWorkoutExercises(JSON.parse(localStorage.getItem(LS.LAST_NAMES) || "[]"));
+
+        // Restore Hellfire active
+        const active = JSON.parse(localStorage.getItem(LS.ACTIVE) || "null");
+        if (active?.workout?.length) {
+          setWorkout(active.workout);
+          setLevel(active.level ?? "beginner");
+          setTotalSU(active.totalSU ?? 300);
+          setTestMode(!!active.testMode);
+          setHfTime(active.time ?? 0);
+          setHfTimerRunning(!!active.timerRunning);
+        }
+
+        // Restore Flow active
+        const flowActive = JSON.parse(localStorage.getItem(LS.FLOW_ACTIVE) || "null");
+        if(flowActive?.flow?.length){
+          setFlowList(flowActive.flow);
+          setFlowCount(flowActive.count ?? 5);
+          setFlowDoubleCat(flowActive.doubleCat ?? null);
+          setFlowTimerPreset(flowActive.timerSeconds ?? 600);
+          setFlowRemaining(flowActive.remaining ?? (flowActive.timerSeconds ?? 600));
+          setFlowRunning(!!flowActive.running);
+        }else{
+          const avoid = JSON.parse(localStorage.getItem(LS.FLOW_LAST_NAMES) || "[]");
+          const gen = generateFlow22({count:5, avoidNames:avoid});
+          setFlowList(gen.flow);
+          setFlowDoubleCat(gen.doubleCat);
+          setFlowRemaining(600);
+        }
+
+        setSuggested(getSuggestedMode());
+      }, []);
+
+      // Sync suggested (tab-to-tab)
+      useEffect(()=>{
+        const onStorage = (e) => {
+          if(e.key === LS.LAST_COMPLETED) setSuggested(getSuggestedMode());
+        };
+        window.addEventListener("storage", onStorage);
+        return ()=>window.removeEventListener("storage", onStorage);
+      }, []);
+
+      // ===== Hellfire timer effect =====
+      useEffect(()=>{
+        if(hfTimerRunning){
+          if(hfIntervalRef.current) clearInterval(hfIntervalRef.current);
+          hfIntervalRef.current = setInterval(()=> setHfTime(prev=>prev+1), 1000);
+        }else if(hfIntervalRef.current){
+          clearInterval(hfIntervalRef.current);
+          hfIntervalRef.current = null;
+        }
+        return ()=>{ if(hfIntervalRef.current) clearInterval(hfIntervalRef.current); };
+      }, [hfTimerRunning]);
+
+      // Persist Hellfire active workout
+      useEffect(()=>{
+        if(workout?.length){
+          localStorage.setItem(LS.ACTIVE, JSON.stringify({
+            workout, level, totalSU, testMode, time: hfTime, timerRunning: hfTimerRunning, startedAt: Date.now()
+          }));
+        }else{
+          localStorage.removeItem(LS.ACTIVE);
+        }
+      }, [workout, level, totalSU, testMode, hfTime, hfTimerRunning]);
+
+      // ===== Flow timer effect (segment 3 countdown) =====
+      useEffect(()=>{
+        if(flowRunning){
+          if(flowIntervalRef.current) clearInterval(flowIntervalRef.current);
+          flowIntervalRef.current = setInterval(()=> setFlowRemaining(prev => Math.max(0, prev - 1)), 1000);
+        }else if(flowIntervalRef.current){
+          clearInterval(flowIntervalRef.current);
+          flowIntervalRef.current = null;
+        }
+        return ()=>{ if(flowIntervalRef.current) clearInterval(flowIntervalRef.current); };
+      }, [flowRunning]);
+
+      // Segment 2 timer effect
+      useEffect(()=>{
+        if(s2Running){
+          if(s2IntervalRef.current) clearInterval(s2IntervalRef.current);
+          s2IntervalRef.current = setInterval(()=> setS2Remaining(prev => Math.max(0, prev - 1)), 1000);
+        }else if(s2IntervalRef.current){
+          clearInterval(s2IntervalRef.current);
+          s2IntervalRef.current = null;
+        }
+        return ()=>{ if(s2IntervalRef.current) clearInterval(s2IntervalRef.current); };
+      }, [s2Running]);
+
+      // Minute beeps + end beep (segment 3)
+      const flowLastMinuteRef = useRef(null);
+      useEffect(()=>{
+        if(!flowRunning || !beepsOn) return;
+        const mm = Math.ceil(flowRemaining / 60);
+        if(flowLastMinuteRef.current === null) flowLastMinuteRef.current = mm;
+        if(mm < flowLastMinuteRef.current){
+          beep(880,0.08);
+          flowLastMinuteRef.current = mm;
+        }
+        if(flowRemaining === 0) tripleBeep();
+      }, [flowRemaining, flowRunning, beepsOn]);
+
+      // Segment 2 beeps + auto-advance phases
+      useEffect(()=>{
+        if(!s2Running || !beepsOn) return;
+        if(s2Remaining === 0) tripleBeep();
+        else if(s2Remaining === 1) beep(880,0.08);
+      }, [s2Remaining, s2Running, beepsOn]);
+
+      useEffect(()=>{
+        if(s2Running && s2Remaining <= 0){
+          setS2Running(false);
+          const next = (ph) => {
+            if(ph === "right") return "rest1";
+            if(ph === "rest1") return "left";
+            if(ph === "left") return "rest2";
+            if(ph === "rest2") return "idle";
+            return "idle";
+          };
+          const n = next(s2Phase);
+          setS2Phase(n);
+          if(n !== "idle") setS2Remaining(60);
+        }
+      }, [s2Remaining, s2Running, s2Phase]);
+
+      // Stop segment 3 automatically at 0
+      useEffect(()=>{
+        if(flowRunning && flowRemaining <= 0){
+          setFlowRunning(false);
+          releaseWakeLock(wl, setWl);
+        }
+      }, [flowRemaining, flowRunning]);
+
+      // Persist Flow active
+      useEffect(()=>{
+        if(flowList?.length){
+          localStorage.setItem(LS.FLOW_ACTIVE, JSON.stringify({
+            flow: flowList,
+            count: flowCount,
+            doubleCat: flowDoubleCat,
+            timerSeconds: flowTimerPreset,
+            remaining: flowRemaining,
+            running: flowRunning,
+            createdAt: Date.now()
+          }));
+        }else{
+          localStorage.removeItem(LS.FLOW_ACTIVE);
+        }
+      }, [flowList, flowCount, flowDoubleCat, flowTimerPreset, flowRemaining, flowRunning]);
+
+      // visibility wake lock
+      useEffect(()=>{
+        const onVis = () => {
+          if(document.visibilityState === "visible" && flowRunning){
+            requestWakeLock(setWl);
+          }
+        };
+        document.addEventListener("visibilitychange", onVis);
+        return ()=>document.removeEventListener("visibilitychange", onVis);
+      }, [flowRunning]);
+
+      /**********************
+       * Top controls
+       **********************/
+      const modeLabel = (m) => {
+        if(m==="strength") return "Strength (H)";
+        if(m==="flow") return "Flow (L)";
+        if(m==="hellfire") return "Fatigue (M)";
+        return "Auto";
+      };
+      const modePill = () => {
+        if(mode !== "auto") return `Handmatig: ${modeLabel(mode)}`;
+        return `Auto: vandaag ${modeLabel(suggested)}`;
+      };
+
+      /**********************
+       * Strength actions
+       **********************/
+      const shuffleStrength = () => {
+        setStrengthOrder(prev => shuffleArray(prev));
+      };
+      const resetStrength = () => {
+        setStrengthSets(Object.fromEntries(BIG_SIX.map(x=>[x.key, 0])));
+      };
+      const incSet = (key) => {
+        setStrengthSets(prev => ({...prev, [key]: (prev[key]||0) + 1}));
+      };
+      const decSet = (key) => {
+        setStrengthSets(prev => ({...prev, [key]: Math.max(0, (prev[key]||0) - 1)}));
+      };
+      const completeStrength = () => {
+        markCompleted("strength");
+        setSuggested(getSuggestedMode());
+        alert("Strength afgerond.");
+      };
+
+      /**********************
+       * Hellfire actions
+       **********************/
+      const startHfTimer = () => { setHfTime(0); setHfTimerRunning(true); };
+      const stopHfTimer = () => {
+        setHfTimerRunning(false);
+        alert(`Workout time: ${fmtClock(hfTime)}`);
+        if(history.length > 0){
+          const updated = [...history];
+          updated[0].time = fmtClock(hfTime);
+          setHistory(updated);
+          localStorage.setItem(LS.HISTORY, JSON.stringify(updated));
+        }
+      };
+
+      const saveToHistory = (type, workoutData, note=null) => {
+        const now = new Date();
+        const entry = {
+          date: now.toLocaleString(),
+          type,
+          level,
+          totalSU,
+          exercises: workoutData.map(ex => ({
+            name: ex.name,
+            reps: ex.reps || ex.formattedReps,
+            pattern: ex.pattern,
+            su: ex.su,
+            unilateral: ex.unilateral,
+            video: ex.video || null
+          })),
+          note
+        };
+        const updated = [entry, ...history].slice(0,5);
+        setHistory(updated);
+        localStorage.setItem(LS.HISTORY, JSON.stringify(updated));
+      };
+
+      const keyForCat = (cat) => ({Push:"push", Pull:"pull", Squat:"squat", Hinge:"hinge"}[cat] || cat);
+
+      const consumeFlowBias = () => {
+        const raw = localStorage.getItem(LS.FLOW_TO_HF);
+        if(!raw) return null;
+        try{
+          const obj = JSON.parse(raw);
+          if(!obj || obj.used) return null;
+          localStorage.setItem(LS.FLOW_TO_HF, JSON.stringify({ ...obj, used:true, usedAt: Date.now() }));
+          return obj;
+        }catch(e){ return null; }
+      };
+
+      const generateWorkout = () => {
+        const hasActive = (workout && workout.length);
+        if(hasActive && !confirm("Er staat nog een actieve Fatigue sessie. Overschrijven met een nieuwe?")) return;
+
+        setHfTimerRunning(false);
+        setHfTime(0);
+        setOpenExercise(null);
+
+        if(testMode){
+          setWorkout(testWorkout);
+          saveToHistory("test", testWorkout, null);
+          localStorage.setItem(LS.LAST_NAMES, JSON.stringify(testWorkout.map(e => e.name)));
+          return;
+        }
+
+        const bias = consumeFlowBias(); // one-time subtle
+        const avoidPattern = bias?.doubleCat ? keyForCat(bias.doubleCat) : null;
+        let preferType = null;
+        if(bias?.ballistic > bias?.grind) preferType = "Grind";
+        if(bias?.grind > bias?.ballistic) preferType = "Ballistic";
+
+        const db = exerciseDatabase[level];
+        const patterns = Object.keys(db);
+        let exercises = [];
+        let currentSU = 0;
+        let patternCount = {};
+
+        const pickExercise = (pattern) => {
+          const basePool = db[pattern] || [];
+          if(!basePool.length) return null;
+
+          const candidates = basePool.filter(opt => !lastWorkoutExercises.includes(opt.name));
+          const pool1 = candidates.length ? candidates : basePool;
+
+          if(preferType && Math.random() < 0.60){
+            const typed = pool1.filter(x => x.type === preferType);
+            if(typed.length) return typed[Math.floor(Math.random() * typed.length)];
+          }
+          return pool1[Math.floor(Math.random() * pool1.length)];
+        };
+
+        patterns.forEach(pattern => {
+          if(avoidPattern && pattern === avoidPattern){
+            patternCount[pattern] = 0; // allow 1, but not extra
+          }
+          const exercise = pickExercise(pattern);
+          if(!exercise) return;
+
+          const suForExercise = Math.floor(Math.random() * 41) + 30; // 30-70
+          const reps = Math.round(suForExercise / exercise.stimulus);
+
+          currentSU += suForExercise;
+          patternCount[pattern] = 1;
+
+          exercises.push({
+            ...exercise,
+            pattern,
+            reps,
+            su: suForExercise,
+            formattedReps: exercise.unilateral
+              ? `${reps} reps (${Math.ceil(reps/2)} per arm)`
+              : `${reps} reps`
+          });
+        });
+
+        while(currentSU < totalSU - 30){
+          const pattern = patterns[Math.floor(Math.random() * patterns.length)];
+          if(patternCount[pattern] >= 2) continue;
+          if(avoidPattern && pattern === avoidPattern && patternCount[pattern] >= 1) continue;
+
+          const exercise = pickExercise(pattern);
+          if(!exercise) continue;
+
+          const suForExercise = Math.floor(Math.random() * 41) + 30;
+          if(currentSU + suForExercise > totalSU + 10) break;
+
+          const reps = Math.round(suForExercise / exercise.stimulus);
+
+          currentSU += suForExercise;
+          patternCount[pattern] = (patternCount[pattern] || 0) + 1;
+
+          exercises.push({
+            ...exercise,
+            pattern,
+            reps,
+            su: suForExercise,
+            formattedReps: exercise.unilateral
+              ? `${reps} reps (${Math.ceil(reps/2)} per arm)`
+              : `${reps} reps`
+          });
+        }
+
+        const finalList = ensureNoAdjacentDuplicateExercises(shuffleArray(exercises));
+        setWorkout(finalList);
+        saveToHistory("workout", finalList, null);
+        localStorage.setItem(LS.LAST_NAMES, JSON.stringify(finalList.map(e => e.name)));
+        setLastWorkoutExercises(finalList.map(e => e.name));
+      };
+
+      const completeHellfire = () => {
+        if(hfTimerRunning){
+          if(!confirm("Timer loopt nog. Stoppen en afronden?")) return;
+          stopHfTimer();
+        }
+        setWorkout([]);
+        localStorage.removeItem(LS.ACTIVE);
+        setOpenExercise(null);
+
+        markCompleted("hellfire");
+        setSuggested(getSuggestedMode());
+
+        alert("Fatigue afgerond.");
+      };
+
+      const abandonHellfire = () => {
+        if(!workout.length) return;
+        if(!confirm("Huidige Fatigue sessie weggooien (niet afronden)?")) return;
+        setWorkout([]);
+        localStorage.removeItem(LS.ACTIVE);
+        setOpenExercise(null);
+      };
+
+      const toggleExpand = (idx) => setExpandedIndex(expandedIndex === idx ? null : idx);
+
+      /**********************
+       * Flow actions
+       **********************/
+      const newFlow = () => {
+        const avoid = JSON.parse(localStorage.getItem(LS.FLOW_LAST_NAMES) || "[]");
+        const gen = generateFlow22({count: flowCount, avoidNames: avoid});
+        setFlowList(gen.flow);
+        setFlowDoubleCat(gen.doubleCat);
+
+        setFlowRunning(false);
+        flowLastMinuteRef.current = null;
+        setFlowRemaining(flowTimerPreset);
+
+        setS2Running(false);
+        setS2Phase("idle");
+        setS2Remaining(60);
+      };
+
+      const applyTimerPreset = (sec) => {
+        setFlowTimerPreset(sec);
+        setFlowRemaining(sec);
+        flowLastMinuteRef.current = null;
+      };
+
+      const flowStartPause = async () => {
+        if(flowRunning){
+          setFlowRunning(false);
+          await releaseWakeLock(wl, setWl);
+          return;
+        }
+        flowLastMinuteRef.current = Math.ceil(flowRemaining / 60);
+        setFlowRunning(true);
+        await requestWakeLock(setWl);
+        if(beepsOn) beep(660,0.10);
+      };
+
+      const flowReset = async () => {
+        setFlowRunning(false);
+        flowLastMinuteRef.current = null;
+        setFlowRemaining(flowTimerPreset);
+        await releaseWakeLock(wl, setWl);
+      };
+
+      const s2Label = (ph) => {
+        if(ph === "right") return "Rechts — flow aan elkaar";
+        if(ph === "rest1") return "Rust — 1 minuut";
+        if(ph === "left") return "Links — flow aan elkaar";
+        if(ph === "rest2") return "Rust — 1 minuut";
+        return "Klaar / idle";
+      };
+
+      const s2Start = () => {
+        let ph = s2Phase;
+        if(ph === "idle"){
+          ph = "right";
+          setS2Phase("right");
+          setS2Remaining(60);
+        }
+        setS2Running(true);
+        if(beepsOn) beep(660,0.10);
+      };
+      const s2Pause = () => setS2Running(false);
+      const s2Reset = () => {
+        setS2Running(false);
+        setS2Phase("idle");
+        setS2Remaining(60);
+      };
+      const s2Next = () => {
+        const next = (ph) => {
+          if(ph === "idle") return "right";
+          if(ph === "right") return "rest1";
+          if(ph === "rest1") return "left";
+          if(ph === "left") return "rest2";
+          if(ph === "rest2") return "idle";
+          return "idle";
+        };
+        const n = next(s2Phase);
+        setS2Phase(n);
+        setS2Remaining(60);
+        setS2Running(false);
+      };
+
+      const completeFlow = async () => {
+        setFlowRunning(false);
+        await releaseWakeLock(wl, setWl);
+
+        localStorage.setItem(LS.FLOW_LAST_NAMES, JSON.stringify(flowList.map(x => x.name)));
+
+        const ballistic = flowList.filter(x => x.type === "ballistic").length;
+        const grind = flowList.filter(x => x.type === "grind").length;
+        localStorage.setItem(LS.FLOW_TO_HF, JSON.stringify({
+          doubleCat: flowDoubleCat || "Push",
+          ballistic,
+          grind,
+          used: false,
+          createdAt: Date.now()
+        }));
+
+        markCompleted("flow");
+        setSuggested(getSuggestedMode());
+
+        alert("Flow afgerond.");
+      };
+
+      /**********************
+       * UI
+       **********************/
+      const activeBadge = (k) => effectiveMode === k ? <span className="pill">vandaag</span> : <span className="pill">—</span>;
+
+      const StrengthBody = () => {
+        const ordered = strengthOrder.map(k => BIG_SIX.find(x => x.key === k)).filter(Boolean);
+        return (
+          <div className="sectionBody">
+            <div className="row" style={{justifyContent:"flex-start"}}>
+              <button className="btn primary" onClick={shuffleStrength}>Shuffle volgorde</button>
+              <button className="btn" onClick={resetStrength}>Reset sets</button>
+              <button className="btn" onClick={completeStrength}>Complete</button>
+            </div>
+
+            <ul className="list">
+              {ordered.map((l, idx) => (
+                <li key={l.key} className="card">
+                  <div>
+                    <div style={{fontWeight:900}}>{idx+1}. {l.name}</div>
+                    <div className="small">{l.target}</div>
+                  </div>
+                  <div className="right">
+                    <div className="row" style={{justifyContent:"flex-end"}}>
+                      <button className="btn" onClick={()=>decSet(l.key)}>-</button>
+                      <button className="btn primary" onClick={()=>incSet(l.key)}>+ set</button>
+                    </div>
+                    <div className="small">sets: <b>{strengthSets[l.key] || 0}</b></div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+
+            <div className="small" style={{marginTop:10}}>
+              Upgrade-regel (jouw controle): als je een lift volledig beheerst op H en je voelt “absolute controle”, dan mag die lift richting M.
+            </div>
+          </div>
+        );
+      };
+
+      const FlowBody = () => (
+        <div className="sectionBody">
+          <div className="row" style={{justifyContent:"flex-start"}}>
+            {[4,5,6].map(n => (
+              <button
+                key={n}
+                className={"btn " + (flowCount===n ? "primary" : "")}
+                onClick={() => {
+                  setFlowCount(n);
+                  const avoid = JSON.parse(localStorage.getItem(LS.FLOW_LAST_NAMES) || "[]");
+                  const gen = generateFlow22({count:n, avoidNames:avoid});
+                  setFlowList(gen.flow);
+                  setFlowDoubleCat(gen.doubleCat);
+
+                  setFlowRunning(false);
+                  flowLastMinuteRef.current = null;
+                  setFlowRemaining(flowTimerPreset);
+
+                  setS2Running(false);
+                  setS2Phase("idle");
+                  setS2Remaining(60);
+                }}
+              >
+                {n} oefeningen
+              </button>
+            ))}
+            <button className="btn primary" onClick={newFlow}>Nieuwe Flow</button>
+            <label className="small" style={{display:"flex", alignItems:"center", gap:8}}>
+              <input type="checkbox" checked={beepsOn} onChange={()=>setBeepsOn(!beepsOn)} />
+              beeps
+            </label>
+          </div>
+
+          <div className="row" style={{justifyContent:"flex-start", marginTop:8}}>
+            <button className={"btn " + (flowTimerPreset===10*60 ? "primary" : "")} onClick={()=>applyTimerPreset(10*60)}>
+              Segment 3: 10:00
+            </button>
+            <button className={"btn " + (flowTimerPreset===15*60 ? "primary" : "")} onClick={()=>applyTimerPreset(15*60)}>
+              Segment 3: 15:00
+            </button>
+          </div>
+
+          <div className="section" style={{margin:"12px 0", borderRadius:12}}>
+            <div className="sectionHead">
+              <div className="sectionTitle">Segment 1 — losse oefeningen</div>
+              <div className="pill">dubbel: {flowDoubleCat || "—"}</div>
+            </div>
+            <div className="sectionBody">
+              <ul className="list">
+                {flowList.map((m, idx)=> (
+                  <li key={idx} className="card">
+                    <div>
+                      <div style={{fontWeight:900}}>{idx+1}. {m.name}</div>
+                      <div className="small">
+                        <span className="kbd">{m.cat}</span>{" "}
+                        <span className="kbd">{m.type}</span>{" "}
+                        {flowDoubleCat && m.cat===flowDoubleCat ? <span className="kbd">×2</span> : null}
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              <div className="small" style={{marginTop:8}}>1–2 rondes om te leren. Doel: Segment 2 & 3 zonder nadenken.</div>
+            </div>
+          </div>
+
+          <div className="section" style={{margin:"12px 0", borderRadius:12}}>
+            <div className="sectionHead">
+              <div className="sectionTitle">Segment 2 — zijde + rust</div>
+              <div className="pill">{s2Label(s2Phase)}</div>
+            </div>
+            <div className="sectionBody">
+              <div className="split">
+                <div className="grow card" style={{alignItems:"flex-start"}}>
+                  <div>
+                    <div className="small">timer</div>
+                    <div className="timer">{fmtClock(s2Remaining)}</div>
+                    <div className="small">{s2Label(s2Phase)}</div>
+                  </div>
+                  <div className="row" style={{justifyContent:"flex-end"}}>
+                    {!s2Running ? (
+                      <button className="btn primary" onClick={s2Start}>Start</button>
+                    ) : (
+                      <button className="btn" onClick={s2Pause}>Pauze</button>
+                    )}
+                    <button className="btn" onClick={s2Next}>Next</button>
+                    <button className="btn" onClick={s2Reset}>Reset</button>
+                  </div>
+                </div>
+              </div>
+              <div className="small" style={{marginTop:8}}>1–3 rondes. Vloeiend → door naar Segment 3. Niet vloeiend → nog een ronde Segment 2.</div>
+            </div>
+          </div>
+
+          <div className="section" style={{margin:"12px 0", borderRadius:12}}>
+            <div className="sectionHead">
+              <div className="sectionTitle">Segment 3 — continuous</div>
+              <div className="pill">wakelock: {wl.supported ? (wl.active ? "aan" : "uit") : "niet ondersteund"}</div>
+            </div>
+            <div className="sectionBody">
+              <div className="split">
+                <div className="grow card" style={{alignItems:"flex-start"}}>
+                  <div>
+                    <div className="small">timer</div>
+                    <div className="timer">{fmtClock(flowRemaining)}</div>
+                  </div>
+                  <div className="row" style={{justifyContent:"flex-end"}}>
+                    <button className={"btn " + (flowRunning ? "" : "primary")} onClick={flowStartPause}>
+                      {flowRunning ? "Pauze" : "Start"}
+                    </button>
+                    <button className="btn" onClick={flowReset}>Reset</button>
+                    <button className="btn primary" onClick={completeFlow}>Complete</button>
+                  </div>
+                </div>
+              </div>
+              <div className="small" style={{marginTop:8}}>Geen extra regels. Ritme, adem, transities. Niet neerzetten.</div>
+            </div>
+          </div>
+        </div>
+      );
+
+      const HellfireBody = () => (
+        <div className="sectionBody">
+          <div className="row" style={{justifyContent:"flex-start"}}>
+            <button className={"btn " + (!testMode ? "primary" : "")} onClick={()=>{ setTestMode(false); setWorkout([]); }}>
+              Normal
+            </button>
+            <button className={"btn " + (testMode ? "primary" : "")} onClick={()=>{ setTestMode(true); setWorkout([]); }}>
+              Test
+            </button>
+
+            {!testMode && (
+              <>
+                <button className={"btn " + (level==="beginner" ? "primary" : "")} onClick={()=>setLevel("beginner")}>beginner</button>
+                <button className={"btn " + (level==="advanced" ? "primary" : "")} onClick={()=>setLevel("advanced")}>advanced</button>
+
+                {[300,400,500].map(v => (
+                  <button key={v} className={"btn " + (totalSU===v ? "primary" : "")} onClick={()=>setTotalSU(v)}>
+                    {v} SU
+                  </button>
+                ))}
+              </>
+            )}
+
+            <button className="btn primary" onClick={generateWorkout}>Generate</button>
+          </div>
+
+          {workout.length > 0 ? (
+            <>
+              <ul className="list" style={{marginTop:12}}>
+                {workout.map((ex, idx) => (
+                  <li key={idx} className="card" style={{alignItems:"flex-start"}}>
+                    <div style={{flex:1}}>
+                      <div style={{fontWeight:900}}>{idx+1}. {ex.name}</div>
+                      <div className="small">
+                        <b>{ex.unilateral ? `${ex.reps} reps (${Math.ceil(ex.reps/2)} per arm)` : `${ex.reps} reps`}</b>
+                        {!testMode && ex.su ? <span className="small"> • {ex.su} SU</span> : null}
+                      </div>
+                      {ex.video ? (
+                        <div style={{marginTop:6}}>
+                          <a className="kbd" href={ex.video} target="_blank" rel="noopener noreferrer">demo</a>
+                        </div>
+                      ) : null}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="row" style={{justifyContent:"flex-start", marginTop:12}}>
+                {!hfTimerRunning ? (
+                  <button className="btn primary" onClick={startHfTimer}>Start timer</button>
+                ) : (
+                  <>
+                    <span className="pill">⏱ {fmtClock(hfTime)}</span>
+                    <button className="btn" onClick={stopHfTimer}>Stop timer</button>
+                  </>
+                )}
+                <button className="btn primary" onClick={completeHellfire}>Complete</button>
+                <button className="btn" onClick={abandonHellfire}>Discard</button>
+              </div>
+            </>
+          ) : (
+            <div className="small" style={{marginTop:10}}>Generate maakt een SU-workout. Geen signature 300.</div>
+          )}
+
+          {history.length > 0 && (
+            <div style={{marginTop:14}}>
+              <div className="small" style={{marginBottom:8}}>History (laatste 5)</div>
+              <ul className="list">
+                {history.map((h, i) => (
+                  <li key={i} className="card" style={{cursor:"pointer"}} onClick={()=>toggleExpand(i)}>
+                    <div style={{flex:1}}>
+                      <div style={{fontWeight:800}}>{h.date}</div>
+                      <div className="small">{h.type === "test" ? "test" : `${h.level} • ${h.totalSU} SU`}{h.time ? ` • ${h.time}` : ""}</div>
+                      {expandedIndex === i && (
+                        <div className="small" style={{marginTop:8}}>
+                          <ul style={{margin:0, paddingLeft:16}}>
+                            {h.exercises?.map((ex, idx)=> (
+                              <li key={idx}>{ex.name} — {String(ex.reps)}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                    <div className="pill">{expandedIndex===i ? "▲" : "▼"}</div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      );
+
+      return (
+        <div>
+          <h1>Three Pillars</h1>
+          <div className="sub">{modePill()}</div>
+
+          <div className="row" style={{marginBottom:10}}>
+            {["auto","strength","flow","hellfire"].map(m => (
+              <button
+                key={m}
+                className={"btn " + (mode===m ? "primary" : "")}
+                onClick={()=>setMode(m)}
+                title={m==="auto" ? "Auto rotateert H → L → M zodra je 'Complete' drukt." : "Handmatig vastzetten."}
+              >
+                {m==="auto" ? "Auto (H→L→M)" : modeLabel(m)}
+              </button>
+            ))}
+          </div>
+
+          <div className="section">
+            <div className="sectionHead">
+              <div className="sectionTitle">🔵 Strength as a Skill (H)</div>
+              {activeBadge("strength")}
+            </div>
+            {effectiveMode === "strength" ? <StrengthBody/> : <div className="sectionBody"><div className="small">Willekeurige volgorde • Big Six • set-teller per lift</div></div>}
+          </div>
+
+          <div className="section">
+            <div className="sectionHead">
+              <div className="sectionTitle">🟢 Movement Exploration (L)</div>
+              {activeBadge("flow")}
+            </div>
+            {effectiveMode === "flow" ? <FlowBody/> : <div className="sectionBody"><div className="small">Flow 2.2 • 3 segmenten • 4–6 oefeningen • 10–15 min continuous</div></div>}
+          </div>
+
+          <div className="section">
+            <div className="sectionHead">
+              <div className="sectionTitle">🔴 Fatigue Management (M)</div>
+              {activeBadge("hellfire")}
+            </div>
+            {effectiveMode === "hellfire" ? <HellfireBody/> : <div className="sectionBody"><div className="small">Hellfire SU generator • 300/400/500 • history blijft</div></div>}
+          </div>
+
+          <div className="small" style={{textAlign:"center", marginTop:10}}>
+            Auto rotatie wisselt pas als je bij de actieve pijler op <b>Complete</b> drukt.
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>

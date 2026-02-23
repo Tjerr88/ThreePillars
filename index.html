@@ -47,6 +47,10 @@
     .split{ display:flex; gap:10px; flex-wrap:wrap; }
     .grow{ flex: 1 1 260px; }
     .right{ text-align:right; }
+
+    .barWrap{ width:120px; height:8px; border:1px solid var(--border); border-radius:999px; overflow:hidden; background:#0f0f0f; }
+    .barFill{ height:100%; background:var(--accent); width:0%; }
+
   </style>
 </head>
 
@@ -95,18 +99,34 @@
       return `${m}:${s < 10 ? "0" : ""}${s}`;
     };
 
-    const beep = (freq=880, dur=0.09, vol=0.08) => {
-      try{
-        const ctx = new (window.AudioContext||window.webkitAudioContext)();
-        const o = ctx.createOscillator();
-        const g = ctx.createGain();
-        o.frequency.value = freq; o.type = "sine";
-        g.gain.value = vol;
-        o.connect(g); g.connect(ctx.destination);
-        o.start();
-        setTimeout(()=>{ o.stop(); ctx.close(); }, dur*1000);
-      }catch(e){}
-    };
+// Audio: reuse a single AudioContext (mobile browsers can throttle if you create many)
+const getAudioCtx = (() => {
+  let ctx = null;
+  return () => {
+    try{
+      if(!ctx || ctx.state === "closed"){
+        ctx = new (window.AudioContext||window.webkitAudioContext)();
+      }
+      return ctx;
+    }catch(e){ return null; }
+  };
+})();
+
+const beep = (freq=880, dur=0.09, vol=0.08) => {
+  try{
+    const ctx = getAudioCtx();
+    if(!ctx) return;
+    if(ctx.state === "suspended") ctx.resume().catch(()=>{});
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.frequency.value = freq; o.type = "sine";
+    g.gain.value = vol;
+    o.connect(g); g.connect(ctx.destination);
+    o.start();
+    o.stop(ctx.currentTime + dur);
+  }catch(e){}
+};
+
     const tripleBeep = () => {
       beep(880,0.08);
       setTimeout(()=>beep(880,0.08), 130);
@@ -202,16 +222,6 @@
     /**********************
      * Hellfire + Flow DBs (same as v1.1)
      **********************/
-    const testWorkout = [
-      { name: "Two-arm Swing", reps: 30, pattern: "hinge", unilateral: false, video: "https://www.youtube.com/watch?v=1cVT3ee9mgU" },
-      { name: "Deadlift", reps: 25, pattern: "hinge", unilateral: false, video: "https://www.youtube.com/watch?v=l6gDwf3xC6s" },
-      { name: "Snatch", reps: 50, pattern: "pull", unilateral: true, video: "https://www.youtube.com/watch?v=QsuJ6973OFc" },
-      { name: "Goblet Squat", reps: 35, pattern: "squat", unilateral: false, video: "https://www.youtube.com/shorts/dBnNCOtuGNQ" },
-      { name: "One-arm Swing", reps: 60, pattern: "hinge", unilateral: true, video: "https://www.youtube.com/watch?v=UYBKrK1y6ww" },
-      { name: "Russian Twist", reps: 40, pattern: "core", unilateral: false, video: "https://www.youtube.com/watch?v=7XUglHKRyMo" },
-      { name: "Clean & Press", reps: 30, pattern: "hybrid", unilateral: true, video: "https://www.youtube.com/watch?v=km3f8_rpDdg" },
-      { name: "Two-arm Swing", reps: 30, pattern: "hinge", unilateral: false, video: "https://www.youtube.com/watch?v=1cVT3ee9mgU" }
-    ];
 
     const exerciseDatabase = {
       beginner: {
@@ -412,8 +422,8 @@
       // ===== Hellfire state =====
       const [level, setLevel] = useState("beginner");
       const [totalSU, setTotalSU] = useState(300);
-      const [testMode, setTestMode] = useState(false);
       const [workout, setWorkout] = useState([]);
+      const [hfGeneratedSU, setHfGeneratedSU] = useState(0);
       const [history, setHistory] = useState([]);
       const [expandedIndex, setExpandedIndex] = useState(null);
       const [lastWorkoutExercises, setLastWorkoutExercises] = useState([]);
@@ -475,9 +485,9 @@
           setWorkout(active.workout);
           setLevel(active.level ?? "beginner");
           setTotalSU(active.totalSU ?? 300);
-          setTestMode(!!active.testMode);
           setHfTime(active.time ?? 0);
           setHfTimerRunning(!!active.timerRunning);
+          setHfGeneratedSU(active.generatedSU ?? 0);
         }
 
         // Restore Flow active
@@ -538,12 +548,12 @@
       useEffect(()=>{
         if(workout?.length){
           localStorage.setItem(LS.ACTIVE, JSON.stringify({
-            workout, level, totalSU, testMode, time: hfTime, timerRunning: hfTimerRunning, startedAt: Date.now()
+            workout, level, totalSU, generatedSU: hfGeneratedSU, time: hfTime, timerRunning: hfTimerRunning, startedAt: Date.now()
           }));
         }else{
           localStorage.removeItem(LS.ACTIVE);
         }
-      }, [workout, level, totalSU, testMode, hfTime, hfTimerRunning]);
+      }, [workout, level, totalSU, hfGeneratedSU, hfTime, hfTimerRunning]);
 
       // ===== Flow timer effect (segment 3 countdown) =====
       useEffect(()=>{
@@ -742,13 +752,7 @@
 
         setHfTimerRunning(false);
         setHfTime(0);
-
-        if(testMode){
-          setWorkout(testWorkout);
-          saveToHistory("test", testWorkout, null);
-          localStorage.setItem(LS.LAST_NAMES, JSON.stringify(testWorkout.map(e => e.name)));
-          return;
-        }
+        setHfGeneratedSU(0);
 
         const bias = consumeFlowBias();
         const avoidPattern = bias?.doubleCat ? keyForCat(bias.doubleCat) : null;
@@ -783,7 +787,8 @@
           const exercise = pickExercise(pattern);
           if(!exercise) return;
 
-          const suForExercise = Math.floor(Math.random() * 41) + 30; // 30-70
+          const range1 = totalSU >= 500 ? [40,80] : (totalSU >= 400 ? [35,75] : [30,70]);
+          const suForExercise = Math.floor(Math.random() * (range1[1] - range1[0] + 1)) + range1[0]; // scaled
           const reps = Math.round(suForExercise / exercise.stimulus);
 
           currentSU += suForExercise;
@@ -808,7 +813,8 @@
           const exercise = pickExercise(pattern);
           if(!exercise) continue;
 
-          const suForExercise = Math.floor(Math.random() * 41) + 30;
+          const range2 = totalSU >= 500 ? [40,80] : (totalSU >= 400 ? [35,75] : [30,70]);
+          const suForExercise = Math.floor(Math.random() * (range2[1] - range2[0] + 1)) + range2[0];
           if(currentSU + suForExercise > totalSU + 10) break;
 
           const reps = Math.round(suForExercise / exercise.stimulus);
@@ -828,6 +834,8 @@
         }
 
         const finalList = ensureNoAdjacentDuplicateExercises(shuffleArray(exercises));
+        const genSU = finalList.reduce((a,x)=>a + (Number.isFinite(x.su)?x.su:0), 0);
+        setHfGeneratedSU(genSU);
         setWorkout(finalList);
         saveToHistory("workout", finalList, null);
         localStorage.setItem(LS.LAST_NAMES, JSON.stringify(finalList.map(e => e.name)));
@@ -840,6 +848,7 @@
           stopHfTimer();
         }
         setWorkout([]);
+        setHfGeneratedSU(0);
         localStorage.removeItem(LS.ACTIVE);
 
         markCompleted("hellfire");
@@ -851,6 +860,7 @@
         if(!workout.length) return;
         if(!confirm("Huidige Fatigue sessie weggooien (niet afronden)?")) return;
         setWorkout([]);
+        setHfGeneratedSU(0);
         localStorage.removeItem(LS.ACTIVE);
       };
 
@@ -960,12 +970,15 @@
        **********************/
       const StrengthBody = () => {
         const ordered = strengthOrder.map(k => BIG_SIX.find(x => x.key === k)).filter(Boolean);
+        const minSets = 3;
+        const targetSets = 5;
+        const ready = ordered.every(l => (strengthSets[l.key] || 0) >= minSets);
         return (
           <div className="sectionBody">
             <div className="row" style={{justifyContent:"flex-start"}}>
               <button className="btn primary" onClick={shuffleStrength}>Shuffle</button>
               <button className="btn" onClick={resetStrength}>Reset</button>
-              <button className="btn primary" onClick={completeStrength}>Complete</button>
+              <button className={"btn " + (ready ? "primary" : "")} onClick={completeStrength} title={"Complete (minimaal " + minSets + " sets per lift)"}>Complete</button>
             </div>
 
             <ul className="list">
@@ -980,7 +993,10 @@
                       <button className="btn" onClick={()=>decSet(l.key)}>-</button>
                       <button className="btn primary" onClick={()=>incSet(l.key)}>+ set</button>
                     </div>
-                    <div className="small">sets: <b>{strengthSets[l.key] || 0}</b></div>
+                    <div className="small">sets: <b>{strengthSets[l.key] || 0}</b> / {targetSets}</div>
+                    <div className="barWrap" aria-hidden="true" style={{marginTop:6, marginLeft:"auto"}}>
+                      <div className="barFill" style={{width: (Math.min(1, (strengthSets[l.key]||0)/targetSets)*100) + "%"}}></div>
+                    </div>
                   </div>
                 </li>
               ))}
@@ -1037,6 +1053,17 @@
               <div className="sectionTitle">Segment 1</div>
               <div className="pill">dubbel: {flowDoubleCat || "—"}</div>
             </div>
+            <div className="sectionBody" style={{paddingBottom:0}}>
+              <div className="card" style={{marginBottom:12}}>
+                <div style={{flex:1}}>
+                  <div className="small">Flow identity</div>
+                  <div style={{fontWeight:900, marginTop:2}}>
+                    Ballistic: {flowList.filter(x=>x.type==="ballistic").length} • Grind: {flowList.filter(x=>x.type==="grind").length} • Oefeningen: {flowList.length}
+                  </div>
+                  <div className="small" style={{marginTop:4}}>Dubbel patroon: <b>{flowDoubleCat || "—"}</b></div>
+                </div>
+              </div>
+            </div>
             <div className="sectionBody">
               <ul className="list">
                 {flowList.map((m, idx)=> (
@@ -1083,7 +1110,7 @@
           <div className="section" style={{margin:"12px 0", borderRadius:12}}>
             <div className="sectionHead">
               <div className="sectionTitle">Segment 3</div>
-              <div className="pill">continuous</div>
+              <div className="pill">{(s2Phase==="idle" && !flowRunning && flowRemaining===flowTimerPreset) ? "klaar voor start" : "continuous"}</div>
             </div>
             <div className="sectionBody">
               <div className="card" style={{alignItems:"flex-start"}}>
@@ -1107,31 +1134,25 @@
       const HellfireBody = () => (
         <div className="sectionBody">
           <div className="row" style={{justifyContent:"flex-start"}}>
-            <button className={"btn " + (!testMode ? "primary" : "")} onClick={()=>{ setTestMode(false); setWorkout([]); }}>
-              Normal
-            </button>
-            <button className={"btn " + (testMode ? "primary" : "")} onClick={()=>{ setTestMode(true); setWorkout([]); }}>
-              Test
-            </button>
+            <button className={"btn " + (level==="beginner" ? "primary" : "")} onClick={()=>setLevel("beginner")}>beginner</button>
+            <button className={"btn " + (level==="advanced" ? "primary" : "")} onClick={()=>setLevel("advanced")}>advanced</button>
 
-            {!testMode && (
-              <>
-                <button className={"btn " + (level==="beginner" ? "primary" : "")} onClick={()=>setLevel("beginner")}>beginner</button>
-                <button className={"btn " + (level==="advanced" ? "primary" : "")} onClick={()=>setLevel("advanced")}>advanced</button>
-
-                {[300,400,500].map(v => (
-                  <button key={v} className={"btn " + (totalSU===v ? "primary" : "")} onClick={()=>setTotalSU(v)}>
-                    {v} SU
-                  </button>
-                ))}
-              </>
-            )}
+            {[300,400,500].map(v => (
+              <button key={v} className={"btn " + (totalSU===v ? "primary" : "")} onClick={()=>setTotalSU(v)}>
+                {v} SU
+              </button>
+            ))}
 
             <button className="btn primary" onClick={generateWorkout}>Generate</button>
             <span className="pill">wakelock: {wl.supported ? (wl.active ? "aan" : "uit") : "niet ondersteund"}</span>
           </div>
 
+          <div className="small" style={{marginTop:10}}>
+            Generated: <b>{hfGeneratedSU}</b> / {totalSU} SU
+          </div>
+
           {workout.length > 0 ? (
+
             <>
               <ul className="list" style={{marginTop:12}}>
                 {workout.map((ex, idx) => (
@@ -1140,7 +1161,7 @@
                       <div style={{fontWeight:900}}>{idx+1}. {ex.name}</div>
                       <div className="small">
                         <b>{ex.unilateral ? `${ex.reps} reps (${Math.ceil(ex.reps/2)} per arm)` : `${ex.reps} reps`}</b>
-                        {!testMode && ex.su ? <span className="small"> • {ex.su} SU</span> : null}
+                        {ex.su ? <span className="small"> • {ex.su} SU</span> : null}
                       </div>
                       {ex.video ? (
                         <div style={{marginTop:8}}>
@@ -1177,7 +1198,7 @@
                   <li key={i} className="card" style={{cursor:"pointer"}} onClick={()=>toggleExpand(i)}>
                     <div style={{flex:1}}>
                       <div style={{fontWeight:800}}>{h.date}</div>
-                      <div className="small">{h.type === "test" ? "test" : `${h.level} • ${h.totalSU} SU`}{h.time ? ` • ${h.time}` : ""}</div>
+                      <div className="small">{h.level + " • " + h.totalSU + " SU" + (h.time ? (" • " + h.time) : "")}</div>
                       {expandedIndex === i && (
                         <div className="small" style={{marginTop:8}}>
                           <ul style={{margin:0, paddingLeft:16}}>

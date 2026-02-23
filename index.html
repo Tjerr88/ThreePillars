@@ -2,14 +2,14 @@
 <html lang="nl">
 <head>
   <meta charset="UTF-8" />
-  <title>Three Pillars — v1</title>
+  <title>Three Pillars — v1.2</title>
 
   <!-- React (UMD) -->
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 
   <style>
     :root{
@@ -20,31 +20,30 @@
       --text:#eee;
       --muted:#bdbdbd;
       --accent:#ff6a00;
-      --accent2:#ff7f24;
       --good:#22c55e;
       --warn:#f59e0b;
       --bad:#ef4444;
     }
-    body{ margin:0; padding:18px; background:var(--bg); color:var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-    .wrap{ max-width: 840px; margin:0 auto; }
+    body{ margin:0; padding:14px; background:var(--bg); color:var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    .wrap{ max-width: 860px; margin:0 auto; }
     h1{ margin:0; text-align:center; font-weight:900; letter-spacing:.2px; }
-    .sub{ text-align:center; margin:10px 0 18px; color:var(--muted); font-size: 13px;}
+    .sub{ text-align:center; margin:10px 0 14px; color:var(--muted); font-size: 13px;}
     .row{ display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
-    .btn{ padding:9px 12px; border-radius:10px; border:1px solid var(--border); background:#222; color:var(--text); cursor:pointer; font-weight:700; font-size:13px; }
+    .btn{ padding:12px 14px; border-radius:12px; border:1px solid var(--border); background:#222; color:var(--text); cursor:pointer; font-weight:800; font-size:14px; -webkit-tap-highlight-color: transparent; }
+    .btn:active{ transform: scale(0.99); }
     .btn:hover{ border-color:#444; }
     .btn.primary{ background:var(--accent); border-color: transparent; color:white; }
-    .btn.ghost{ background:transparent; }
-    .pill{ display:inline-block; padding:3px 8px; border-radius:999px; border:1px solid var(--border); font-size:12px; color:var(--muted); }
+    .pill{ display:inline-block; padding:4px 10px; border-radius:999px; border:1px solid var(--border); font-size:12px; color:var(--muted); }
     .section{ margin:14px 0; border:1px solid var(--border); border-radius:14px; overflow:hidden; background:var(--panel); }
     .sectionHead{ padding:12px 14px; background:var(--panel2); display:flex; align-items:center; justify-content:space-between; gap:10px; }
     .sectionTitle{ font-weight:900; font-size:16px; }
     .sectionBody{ padding:12px 14px; }
     .small{ font-size:12px; color:var(--muted); line-height:1.35; }
-    .list{ margin:10px 0 0; padding:0; list-style:none; display:flex; flex-direction:column; gap:8px; }
-    .card{ border:1px solid var(--border); background:#121212; border-radius:12px; padding:10px 10px; display:flex; justify-content:space-between; align-items:center; gap:10px; }
-    .kbd{ display:inline-block; padding:.1rem .35rem; border-radius:.5rem; border:1px solid var(--border); font-size:.75rem; color:var(--muted); }
+    .list{ margin:10px 0 0; padding:0; list-style:none; display:flex; flex-direction:column; gap:10px; }
+    .card{ border:1px solid var(--border); background:#121212; border-radius:12px; padding:12px 12px; display:flex; justify-content:space-between; align-items:center; gap:10px; }
+    .kbd{ display:inline-block; padding:.12rem .42rem; border-radius:.6rem; border:1px solid var(--border); font-size:.78rem; color:var(--muted); }
     a{ color:#ffd3b4; }
-    .timer{ font-size:26px; font-weight:900; letter-spacing:.5px; }
+    .timer{ font-size:28px; font-weight:900; letter-spacing:.5px; }
     .split{ display:flex; gap:10px; flex-wrap:wrap; }
     .grow{ flex: 1 1 260px; }
     .right{ text-align:right; }
@@ -68,6 +67,7 @@
       }
       return arr;
     };
+
     const ensureNoAdjacentDuplicateExercises = (list) => {
       if (list.length < 2) return list;
       let arr = [...list];
@@ -88,11 +88,13 @@
       }
       return arr;
     };
+
     const fmtClock = (seconds) => {
       const m = Math.floor(seconds / 60);
       const s = seconds % 60;
       return `${m}:${s < 10 ? "0" : ""}${s}`;
     };
+
     const beep = (freq=880, dur=0.09, vol=0.08) => {
       try{
         const ctx = new (window.AudioContext||window.webkitAudioContext)();
@@ -125,10 +127,14 @@
       FLOW_LAST_NAMES: "kbFlowLastNames",
 
       // Three Pillars rotation
-      LAST_COMPLETED: "kbThreePillars_lastCompleted", // {date, mode} mode in ["strength","flow","hellfire"]
+      LAST_COMPLETED: "kbThreePillars_lastCompleted", // {date, mode}
 
       // Flow -> Hellfire (one-time subtle bias)
-      FLOW_TO_HF: "kbFlowToHellfireOnce" // { doubleCat, ballistic, grind, used:false }
+      FLOW_TO_HF: "kbFlowToHellfireOnce",
+
+      // UI state (for recovery after reload)
+      UI_MODE: "kbThreePillars_uiMode", // "auto" | "strength" | "flow" | "hellfire"
+      STRENGTH_ACTIVE: "kbThreePillars_strengthActive" // { order:[keys], sets:{key:number} }
     };
 
     const todayKey = () => {
@@ -161,7 +167,40 @@
     };
 
     /**********************
-     * Hellfire data (from your existing Hybrid v2)
+     * Wakelock
+     **********************/
+    async function requestWakeLock(setState){
+      try{
+        if("wakeLock" in navigator){
+          const lock = await navigator.wakeLock.request("screen");
+          setState({ supported:true, active:true, lock });
+          lock.addEventListener("release", ()=>setState(prev=>({...prev, active:false, lock:null})));
+        }else{
+          setState({ supported:false, active:false, lock:null });
+        }
+      }catch(e){
+        setState({ supported:true, active:false, lock:null });
+      }
+    }
+    async function releaseWakeLock(wl, setState){
+      try{ if(wl?.lock){ await wl.lock.release(); } }catch(e){}
+      setState(prev=>({...prev, active:false, lock:null}));
+    }
+
+    /**********************
+     * Strength as a Skill (Big Six)
+     **********************/
+    const BIG_SIX = [
+      { key:"dfs", name:"Double KB Front Squat", target:"3–5 × 3–5" },
+      { key:"dcl", name:"Double Clean", target:"3–5 × 3" },
+      { key:"sw",  name:"Swing (two-arm of one-arm)", target:"3–5 × 5" },
+      { key:"sn",  name:"Snatch", target:"3–5 × 3 / arm" },
+      { key:"mp",  name:"Military Press", target:"3–5 × 3–5 / arm" },
+      { key:"tgu", name:"Get Up", target:"3–5 singles / kant" },
+    ];
+
+    /**********************
+     * Hellfire + Flow DBs (same as v1.1)
      **********************/
     const testWorkout = [
       { name: "Two-arm Swing", reps: 30, pattern: "hinge", unilateral: false, video: "https://www.youtube.com/watch?v=1cVT3ee9mgU" },
@@ -241,9 +280,6 @@
       }
     };
 
-    /**********************
-     * Flowing 2.2 DB
-     **********************/
     const FLOW_DB = {
       Push: [
         {name:"Military Press", type:"grind"},
@@ -359,47 +395,17 @@
       return { flow: out, doubleCat, ballistic, grind };
     }
 
-    /**********************
-     * Wakelock
-     **********************/
-    async function requestWakeLock(setState){
-      try{
-        if("wakeLock" in navigator){
-          const lock = await navigator.wakeLock.request("screen");
-          setState({ supported:true, active:true, lock });
-          lock.addEventListener("release", ()=>setState(prev=>({...prev, active:false, lock:null})));
-        }else{
-          setState({ supported:false, active:false, lock:null });
-        }
-      }catch(e){
-        setState({ supported:true, active:false, lock:null });
-      }
-    }
-    async function releaseWakeLock(wl, setState){
-      try{ if(wl?.lock){ await wl.lock.release(); } }catch(e){}
-      setState(prev=>({...prev, active:false, lock:null}));
-    }
-
-    /**********************
-     * Strength as a Skill (Big Six)
-     **********************/
-    const BIG_SIX = [
-      { key:"dfs", name:"Double KB Front Squat", target:"3–5 × 3–5" },
-      { key:"dcl", name:"Double Clean", target:"3–5 × 3" },
-      { key:"sw",  name:"Swing (two-arm of one-arm)", target:"3–5 × 5" },
-      { key:"sn",  name:"Snatch", target:"3–5 × 3 / arm" },
-      { key:"mp",  name:"Military Press", target:"3–5 × 3–5 / arm" },
-      { key:"tgu", name:"Get Up", target:"3–5 singles / kant" },
-    ];
-
     function App(){
-      // Mode UI
+      // UI mode (restored)
       const [mode, setMode] = useState("auto"); // auto | strength | flow | hellfire
       const [suggested, setSuggested] = useState(getSuggestedMode());
 
       const effectiveMode = useMemo(()=> mode === "auto" ? suggested : mode, [mode, suggested]);
 
-      // ===== Strength state =====
+      // ===== Wakelock state =====
+      const [wl, setWl] = useState({ supported:true, active:false, lock:null });
+
+      // ===== Strength state (persisted) =====
       const [strengthOrder, setStrengthOrder] = useState(BIG_SIX.map(x=>x.key));
       const [strengthSets, setStrengthSets] = useState(Object.fromEntries(BIG_SIX.map(x=>[x.key, 0])));
 
@@ -410,7 +416,6 @@
       const [workout, setWorkout] = useState([]);
       const [history, setHistory] = useState([]);
       const [expandedIndex, setExpandedIndex] = useState(null);
-      const [openExercise, setOpenExercise] = useState(null);
       const [lastWorkoutExercises, setLastWorkoutExercises] = useState([]);
 
       // Hellfire timer
@@ -427,17 +432,40 @@
       const [flowRunning, setFlowRunning] = useState(false);
       const flowIntervalRef = useRef(null);
 
-      // Segment 2 timer (per-side)
+      // Segment 2 timer (persisted)
       const [s2Phase, setS2Phase] = useState("idle"); // idle | right | rest1 | left | rest2
       const [s2Remaining, setS2Remaining] = useState(60);
       const [s2Running, setS2Running] = useState(false);
       const s2IntervalRef = useRef(null);
 
       const [beepsOn, setBeepsOn] = useState(true);
-      const [wl, setWl] = useState({ supported:true, active:false, lock:null });
 
-      // INIT
+      // INIT restore
       useEffect(()=>{
+        // UI mode restore
+        const ui = localStorage.getItem(LS.UI_MODE);
+        if(ui && ["auto","strength","flow","hellfire"].includes(ui)) setMode(ui);
+
+        // Strength restore
+        const sRaw = localStorage.getItem(LS.STRENGTH_ACTIVE);
+        if(sRaw){
+          try{
+            const s = JSON.parse(sRaw);
+            if(Array.isArray(s?.order) && s.order.length){
+              const valid = s.order.filter(k => BIG_SIX.some(x=>x.key===k));
+              if(valid.length === BIG_SIX.length) setStrengthOrder(valid);
+            }
+            if(s?.sets && typeof s.sets === "object"){
+              const nextSets = Object.fromEntries(BIG_SIX.map(x=>[x.key, 0]));
+              for(const k of Object.keys(nextSets)){
+                if(Number.isFinite(s.sets[k])) nextSets[k] = Math.max(0, Math.floor(s.sets[k]));
+              }
+              setStrengthSets(nextSets);
+            }
+          }catch(e){}
+        }
+
+        // Hellfire history + last
         setHistory(JSON.parse(localStorage.getItem(LS.HISTORY) || "[]"));
         setLastWorkoutExercises(JSON.parse(localStorage.getItem(LS.LAST_NAMES) || "[]"));
 
@@ -461,6 +489,9 @@
           setFlowTimerPreset(flowActive.timerSeconds ?? 600);
           setFlowRemaining(flowActive.remaining ?? (flowActive.timerSeconds ?? 600));
           setFlowRunning(!!flowActive.running);
+          setS2Phase(flowActive.s2Phase ?? "idle");
+          setS2Remaining(flowActive.s2Remaining ?? 60);
+          setS2Running(!!flowActive.s2Running);
         }else{
           const avoid = JSON.parse(localStorage.getItem(LS.FLOW_LAST_NAMES) || "[]");
           const gen = generateFlow22({count:5, avoidNames:avoid});
@@ -471,6 +502,16 @@
 
         setSuggested(getSuggestedMode());
       }, []);
+
+      // Persist UI mode
+      useEffect(()=>{
+        localStorage.setItem(LS.UI_MODE, mode);
+      }, [mode]);
+
+      // Persist Strength active
+      useEffect(()=>{
+        localStorage.setItem(LS.STRENGTH_ACTIVE, JSON.stringify({ order: strengthOrder, sets: strengthSets }));
+      }, [strengthOrder, strengthSets]);
 
       // Sync suggested (tab-to-tab)
       useEffect(()=>{
@@ -493,7 +534,7 @@
         return ()=>{ if(hfIntervalRef.current) clearInterval(hfIntervalRef.current); };
       }, [hfTimerRunning]);
 
-      // Persist Hellfire active workout
+      // Persist Hellfire active workout (session memory)
       useEffect(()=>{
         if(workout?.length){
           localStorage.setItem(LS.ACTIVE, JSON.stringify({
@@ -528,7 +569,25 @@
         return ()=>{ if(s2IntervalRef.current) clearInterval(s2IntervalRef.current); };
       }, [s2Running]);
 
-      // Minute beeps + end beep (segment 3)
+      // Persist Flow active (includes Segment 2 state)
+      useEffect(()=>{
+        if(flowList?.length){
+          localStorage.setItem(LS.FLOW_ACTIVE, JSON.stringify({
+            flow: flowList,
+            count: flowCount,
+            doubleCat: flowDoubleCat,
+            timerSeconds: flowTimerPreset,
+            remaining: flowRemaining,
+            running: flowRunning,
+            s2Phase, s2Remaining, s2Running,
+            createdAt: Date.now()
+          }));
+        }else{
+          localStorage.removeItem(LS.FLOW_ACTIVE);
+        }
+      }, [flowList, flowCount, flowDoubleCat, flowTimerPreset, flowRemaining, flowRunning, s2Phase, s2Remaining, s2Running]);
+
+      // Beeps: Flow segment 3 minute ticks + end
       const flowLastMinuteRef = useRef(null);
       useEffect(()=>{
         if(!flowRunning || !beepsOn) return;
@@ -564,7 +623,7 @@
         }
       }, [s2Remaining, s2Running, s2Phase]);
 
-      // Stop segment 3 automatically at 0
+      // Stop Flow at 0
       useEffect(()=>{
         if(flowRunning && flowRemaining <= 0){
           setFlowRunning(false);
@@ -572,36 +631,34 @@
         }
       }, [flowRemaining, flowRunning]);
 
-      // Persist Flow active
+      /**********************
+       * Wakelock behavior
+       * - Flow running => wakelock on
+       * - Hellfire timer running => wakelock on
+       **********************/
       useEffect(()=>{
-        if(flowList?.length){
-          localStorage.setItem(LS.FLOW_ACTIVE, JSON.stringify({
-            flow: flowList,
-            count: flowCount,
-            doubleCat: flowDoubleCat,
-            timerSeconds: flowTimerPreset,
-            remaining: flowRemaining,
-            running: flowRunning,
-            createdAt: Date.now()
-          }));
+        const needs = flowRunning || hfTimerRunning;
+        if(needs){
+          requestWakeLock(setWl);
         }else{
-          localStorage.removeItem(LS.FLOW_ACTIVE);
+          releaseWakeLock(wl, setWl);
         }
-      }, [flowList, flowCount, flowDoubleCat, flowTimerPreset, flowRemaining, flowRunning]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [flowRunning, hfTimerRunning]);
 
-      // visibility wake lock
+      // Re-acquire wakelock when coming back to foreground
       useEffect(()=>{
         const onVis = () => {
-          if(document.visibilityState === "visible" && flowRunning){
+          if(document.visibilityState === "visible" && (flowRunning || hfTimerRunning)){
             requestWakeLock(setWl);
           }
         };
         document.addEventListener("visibilitychange", onVis);
         return ()=>document.removeEventListener("visibilitychange", onVis);
-      }, [flowRunning]);
+      }, [flowRunning, hfTimerRunning]);
 
       /**********************
-       * Top controls
+       * UI helpers
        **********************/
       const modeLabel = (m) => {
         if(m==="strength") return "Strength (H)";
@@ -614,21 +671,15 @@
         return `Auto: vandaag ${modeLabel(suggested)}`;
       };
 
+      const activeBadge = (k) => effectiveMode === k ? <span className="pill">vandaag</span> : <span className="pill">—</span>;
+
       /**********************
        * Strength actions
        **********************/
-      const shuffleStrength = () => {
-        setStrengthOrder(prev => shuffleArray(prev));
-      };
-      const resetStrength = () => {
-        setStrengthSets(Object.fromEntries(BIG_SIX.map(x=>[x.key, 0])));
-      };
-      const incSet = (key) => {
-        setStrengthSets(prev => ({...prev, [key]: (prev[key]||0) + 1}));
-      };
-      const decSet = (key) => {
-        setStrengthSets(prev => ({...prev, [key]: Math.max(0, (prev[key]||0) - 1)}));
-      };
+      const shuffleStrength = () => setStrengthOrder(prev => shuffleArray(prev));
+      const resetStrength = () => setStrengthSets(Object.fromEntries(BIG_SIX.map(x=>[x.key, 0])));
+      const incSet = (key) => setStrengthSets(prev => ({...prev, [key]: (prev[key]||0) + 1}));
+      const decSet = (key) => setStrengthSets(prev => ({...prev, [key]: Math.max(0, (prev[key]||0) - 1)}));
       const completeStrength = () => {
         markCompleted("strength");
         setSuggested(getSuggestedMode());
@@ -691,7 +742,6 @@
 
         setHfTimerRunning(false);
         setHfTime(0);
-        setOpenExercise(null);
 
         if(testMode){
           setWorkout(testWorkout);
@@ -700,7 +750,7 @@
           return;
         }
 
-        const bias = consumeFlowBias(); // one-time subtle
+        const bias = consumeFlowBias();
         const avoidPattern = bias?.doubleCat ? keyForCat(bias.doubleCat) : null;
         let preferType = null;
         if(bias?.ballistic > bias?.grind) preferType = "Grind";
@@ -712,11 +762,13 @@
         let currentSU = 0;
         let patternCount = {};
 
+        const lastNames = lastWorkoutExercises || [];
+
         const pickExercise = (pattern) => {
           const basePool = db[pattern] || [];
           if(!basePool.length) return null;
 
-          const candidates = basePool.filter(opt => !lastWorkoutExercises.includes(opt.name));
+          const candidates = basePool.filter(opt => !lastNames.includes(opt.name));
           const pool1 = candidates.length ? candidates : basePool;
 
           if(preferType && Math.random() < 0.60){
@@ -727,9 +779,7 @@
         };
 
         patterns.forEach(pattern => {
-          if(avoidPattern && pattern === avoidPattern){
-            patternCount[pattern] = 0; // allow 1, but not extra
-          }
+          if(avoidPattern && pattern === avoidPattern) patternCount[pattern] = 0;
           const exercise = pickExercise(pattern);
           if(!exercise) return;
 
@@ -791,11 +841,9 @@
         }
         setWorkout([]);
         localStorage.removeItem(LS.ACTIVE);
-        setOpenExercise(null);
 
         markCompleted("hellfire");
         setSuggested(getSuggestedMode());
-
         alert("Fatigue afgerond.");
       };
 
@@ -804,7 +852,6 @@
         if(!confirm("Huidige Fatigue sessie weggooien (niet afronden)?")) return;
         setWorkout([]);
         localStorage.removeItem(LS.ACTIVE);
-        setOpenExercise(null);
       };
 
       const toggleExpand = (idx) => setExpandedIndex(expandedIndex === idx ? null : idx);
@@ -836,12 +883,10 @@
       const flowStartPause = async () => {
         if(flowRunning){
           setFlowRunning(false);
-          await releaseWakeLock(wl, setWl);
           return;
         }
         flowLastMinuteRef.current = Math.ceil(flowRemaining / 60);
         setFlowRunning(true);
-        await requestWakeLock(setWl);
         if(beepsOn) beep(660,0.10);
       };
 
@@ -849,7 +894,6 @@
         setFlowRunning(false);
         flowLastMinuteRef.current = null;
         setFlowRemaining(flowTimerPreset);
-        await releaseWakeLock(wl, setWl);
       };
 
       const s2Label = (ph) => {
@@ -893,7 +937,6 @@
 
       const completeFlow = async () => {
         setFlowRunning(false);
-        await releaseWakeLock(wl, setWl);
 
         localStorage.setItem(LS.FLOW_LAST_NAMES, JSON.stringify(flowList.map(x => x.name)));
 
@@ -909,23 +952,20 @@
 
         markCompleted("flow");
         setSuggested(getSuggestedMode());
-
         alert("Flow afgerond.");
       };
 
       /**********************
-       * UI
+       * UI components
        **********************/
-      const activeBadge = (k) => effectiveMode === k ? <span className="pill">vandaag</span> : <span className="pill">—</span>;
-
       const StrengthBody = () => {
         const ordered = strengthOrder.map(k => BIG_SIX.find(x => x.key === k)).filter(Boolean);
         return (
           <div className="sectionBody">
             <div className="row" style={{justifyContent:"flex-start"}}>
-              <button className="btn primary" onClick={shuffleStrength}>Shuffle volgorde</button>
-              <button className="btn" onClick={resetStrength}>Reset sets</button>
-              <button className="btn" onClick={completeStrength}>Complete</button>
+              <button className="btn primary" onClick={shuffleStrength}>Shuffle</button>
+              <button className="btn" onClick={resetStrength}>Reset</button>
+              <button className="btn primary" onClick={completeStrength}>Complete</button>
             </div>
 
             <ul className="list">
@@ -945,10 +985,6 @@
                 </li>
               ))}
             </ul>
-
-            <div className="small" style={{marginTop:10}}>
-              Upgrade-regel (jouw controle): als je een lift volledig beheerst op H en je voelt “absolute controle”, dan mag die lift richting M.
-            </div>
           </div>
         );
       };
@@ -979,7 +1015,7 @@
                 {n} oefeningen
               </button>
             ))}
-            <button className="btn primary" onClick={newFlow}>Nieuwe Flow</button>
+            <button className="btn primary" onClick={newFlow}>Nieuwe</button>
             <label className="small" style={{display:"flex", alignItems:"center", gap:8}}>
               <input type="checkbox" checked={beepsOn} onChange={()=>setBeepsOn(!beepsOn)} />
               beeps
@@ -988,16 +1024,17 @@
 
           <div className="row" style={{justifyContent:"flex-start", marginTop:8}}>
             <button className={"btn " + (flowTimerPreset===10*60 ? "primary" : "")} onClick={()=>applyTimerPreset(10*60)}>
-              Segment 3: 10:00
+              10:00
             </button>
             <button className={"btn " + (flowTimerPreset===15*60 ? "primary" : "")} onClick={()=>applyTimerPreset(15*60)}>
-              Segment 3: 15:00
+              15:00
             </button>
+            <span className="pill">wakelock: {wl.supported ? (wl.active ? "aan" : "uit") : "niet ondersteund"}</span>
           </div>
 
           <div className="section" style={{margin:"12px 0", borderRadius:12}}>
             <div className="sectionHead">
-              <div className="sectionTitle">Segment 1 — losse oefeningen</div>
+              <div className="sectionTitle">Segment 1</div>
               <div className="pill">dubbel: {flowDoubleCat || "—"}</div>
             </div>
             <div className="sectionBody">
@@ -1015,60 +1052,53 @@
                   </li>
                 ))}
               </ul>
-              <div className="small" style={{marginTop:8}}>1–2 rondes om te leren. Doel: Segment 2 & 3 zonder nadenken.</div>
             </div>
           </div>
 
           <div className="section" style={{margin:"12px 0", borderRadius:12}}>
             <div className="sectionHead">
-              <div className="sectionTitle">Segment 2 — zijde + rust</div>
+              <div className="sectionTitle">Segment 2</div>
               <div className="pill">{s2Label(s2Phase)}</div>
             </div>
             <div className="sectionBody">
-              <div className="split">
-                <div className="grow card" style={{alignItems:"flex-start"}}>
-                  <div>
-                    <div className="small">timer</div>
-                    <div className="timer">{fmtClock(s2Remaining)}</div>
-                    <div className="small">{s2Label(s2Phase)}</div>
-                  </div>
-                  <div className="row" style={{justifyContent:"flex-end"}}>
-                    {!s2Running ? (
-                      <button className="btn primary" onClick={s2Start}>Start</button>
-                    ) : (
-                      <button className="btn" onClick={s2Pause}>Pauze</button>
-                    )}
-                    <button className="btn" onClick={s2Next}>Next</button>
-                    <button className="btn" onClick={s2Reset}>Reset</button>
-                  </div>
+              <div className="card" style={{alignItems:"flex-start"}}>
+                <div>
+                  <div className="small">timer</div>
+                  <div className="timer">{fmtClock(s2Remaining)}</div>
+                  <div className="small">{s2Label(s2Phase)}</div>
+                </div>
+                <div className="row" style={{justifyContent:"flex-end"}}>
+                  {!s2Running ? (
+                    <button className="btn primary" onClick={s2Start}>Start</button>
+                  ) : (
+                    <button className="btn" onClick={s2Pause}>Pauze</button>
+                  )}
+                  <button className="btn" onClick={s2Next}>Next</button>
+                  <button className="btn" onClick={s2Reset}>Reset</button>
                 </div>
               </div>
-              <div className="small" style={{marginTop:8}}>1–3 rondes. Vloeiend → door naar Segment 3. Niet vloeiend → nog een ronde Segment 2.</div>
             </div>
           </div>
 
           <div className="section" style={{margin:"12px 0", borderRadius:12}}>
             <div className="sectionHead">
-              <div className="sectionTitle">Segment 3 — continuous</div>
-              <div className="pill">wakelock: {wl.supported ? (wl.active ? "aan" : "uit") : "niet ondersteund"}</div>
+              <div className="sectionTitle">Segment 3</div>
+              <div className="pill">continuous</div>
             </div>
             <div className="sectionBody">
-              <div className="split">
-                <div className="grow card" style={{alignItems:"flex-start"}}>
-                  <div>
-                    <div className="small">timer</div>
-                    <div className="timer">{fmtClock(flowRemaining)}</div>
-                  </div>
-                  <div className="row" style={{justifyContent:"flex-end"}}>
-                    <button className={"btn " + (flowRunning ? "" : "primary")} onClick={flowStartPause}>
-                      {flowRunning ? "Pauze" : "Start"}
-                    </button>
-                    <button className="btn" onClick={flowReset}>Reset</button>
-                    <button className="btn primary" onClick={completeFlow}>Complete</button>
-                  </div>
+              <div className="card" style={{alignItems:"flex-start"}}>
+                <div>
+                  <div className="small">timer</div>
+                  <div className="timer">{fmtClock(flowRemaining)}</div>
+                </div>
+                <div className="row" style={{justifyContent:"flex-end"}}>
+                  <button className={"btn " + (flowRunning ? "" : "primary")} onClick={flowStartPause}>
+                    {flowRunning ? "Pauze" : "Start"}
+                  </button>
+                  <button className="btn" onClick={flowReset}>Reset</button>
+                  <button className="btn primary" onClick={completeFlow}>Complete</button>
                 </div>
               </div>
-              <div className="small" style={{marginTop:8}}>Geen extra regels. Ritme, adem, transities. Niet neerzetten.</div>
             </div>
           </div>
         </div>
@@ -1098,6 +1128,7 @@
             )}
 
             <button className="btn primary" onClick={generateWorkout}>Generate</button>
+            <span className="pill">wakelock: {wl.supported ? (wl.active ? "aan" : "uit") : "niet ondersteund"}</span>
           </div>
 
           {workout.length > 0 ? (
@@ -1112,7 +1143,7 @@
                         {!testMode && ex.su ? <span className="small"> • {ex.su} SU</span> : null}
                       </div>
                       {ex.video ? (
-                        <div style={{marginTop:6}}>
+                        <div style={{marginTop:8}}>
                           <a className="kbd" href={ex.video} target="_blank" rel="noopener noreferrer">demo</a>
                         </div>
                       ) : null}
@@ -1135,7 +1166,7 @@
               </div>
             </>
           ) : (
-            <div className="small" style={{marginTop:10}}>Generate maakt een SU-workout. Geen signature 300.</div>
+            <div className="small" style={{marginTop:10}}>Generate maakt een SU-workout. (sessie blijft bewaard bij refresh)</div>
           )}
 
           {history.length > 0 && (
@@ -1171,7 +1202,9 @@
           <h1>Three Pillars</h1>
           <div className="sub">{modePill()}</div>
 
-          <div className="small" style={{textAlign:"center", marginBottom:10}}>Tip: klik op de sectiekop om die pijler te openen.</div>\n\n          <div className="row" style={{marginBottom:10}}>
+          <div className="small" style={{textAlign:"center", marginBottom:10}}>Tip: klik op de sectiekop om die pijler te openen.</div>
+
+          <div className="row" style={{marginBottom:10}}>
             {["auto","strength","flow","hellfire"].map(m => (
               <button
                 key={m}
@@ -1185,27 +1218,27 @@
           </div>
 
           <div className="section">
-            <div className="sectionHead">
+            <div className="sectionHead" style={{cursor:"pointer"}} onClick={()=>setMode("strength")}>
               <div className="sectionTitle">🔵 Strength as a Skill (H)</div>
               {activeBadge("strength")}
             </div>
-            {effectiveMode === "strength" ? <StrengthBody/> : <div className="sectionBody"><div className="small">Willekeurige volgorde • Big Six • set-teller per lift</div></div>}
+            {effectiveMode === "strength" ? <StrengthBody/> : <div className="sectionBody"><div className="small">Big Six • shuffle volgorde • set-tellers blijven bewaard bij refresh</div></div>}
           </div>
 
           <div className="section">
-            <div className="sectionHead">
+            <div className="sectionHead" style={{cursor:"pointer"}} onClick={()=>setMode("flow")}>
               <div className="sectionTitle">🟢 Movement Exploration (L)</div>
               {activeBadge("flow")}
             </div>
-            {effectiveMode === "flow" ? <FlowBody/> : <div className="sectionBody"><div className="small">Flow 2.2 • 3 segmenten • 4–6 oefeningen • 10–15 min continuous</div></div>}
+            {effectiveMode === "flow" ? <FlowBody/> : <div className="sectionBody"><div className="small">Flow 2.2 • timers & segment 2 state blijven bewaard bij refresh</div></div>}
           </div>
 
           <div className="section">
-            <div className="sectionHead">
+            <div className="sectionHead" style={{cursor:"pointer"}} onClick={()=>setMode("hellfire")}>
               <div className="sectionTitle">🔴 Fatigue Management (M)</div>
               {activeBadge("hellfire")}
             </div>
-            {effectiveMode === "hellfire" ? <HellfireBody/> : <div className="sectionBody"><div className="small">Hellfire SU generator • 300/400/500 • history blijft</div></div>}
+            {effectiveMode === "hellfire" ? <HellfireBody/> : <div className="sectionBody"><div className="small">SU generator • actieve sessie + timer blijven bewaard bij refresh</div></div>}
           </div>
 
           <div className="small" style={{textAlign:"center", marginTop:10}}>

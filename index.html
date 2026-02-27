@@ -99,33 +99,33 @@
       return `${m}:${s < 10 ? "0" : ""}${s}`;
     };
 
-// Audio: reuse a single AudioContext (mobile browsers can throttle if you create many)
-const getAudioCtx = (() => {
-  let ctx = null;
-  return () => {
-    try{
-      if(!ctx || ctx.state === "closed"){
-        ctx = new (window.AudioContext||window.webkitAudioContext)();
-      }
-      return ctx;
-    }catch(e){ return null; }
-  };
-})();
+    // Audio: reuse a single AudioContext (mobile browsers can throttle if you create many)
+    const getAudioCtx = (() => {
+      let ctx = null;
+      return () => {
+        try{
+          if(!ctx || ctx.state === "closed"){
+            ctx = new (window.AudioContext||window.webkitAudioContext)();
+          }
+          return ctx;
+        }catch(e){ return null; }
+      };
+    })();
 
-const beep = (freq=880, dur=0.09, vol=0.08) => {
-  try{
-    const ctx = getAudioCtx();
-    if(!ctx) return;
-    if(ctx.state === "suspended") ctx.resume().catch(()=>{});
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.frequency.value = freq; o.type = "sine";
-    g.gain.value = vol;
-    o.connect(g); g.connect(ctx.destination);
-    o.start();
-    o.stop(ctx.currentTime + dur);
-  }catch(e){}
-};
+    const beep = (freq=880, dur=0.09, vol=0.08) => {
+      try{
+        const ctx = getAudioCtx();
+        if(!ctx) return;
+        if(ctx.state === "suspended") ctx.resume().catch(()=>{});
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.frequency.value = freq; o.type = "sine";
+        g.gain.value = vol;
+        o.connect(g); g.connect(ctx.destination);
+        o.start();
+        o.stop(ctx.currentTime + dur);
+      }catch(e){}
+    };
 
     const tripleBeep = () => {
       beep(880,0.08);
@@ -154,7 +154,8 @@ const beep = (freq=880, dur=0.09, vol=0.08) => {
 
       // UI state (for recovery after reload)
       UI_MODE: "kbThreePillars_uiMode", // "auto" | "strength" | "flow" | "hellfire"
-      STRENGTH_ACTIVE: "kbThreePillars_strengthActive" // { order:[keys], sets:{key:number} }
+      STRENGTH_ACTIVE: "kbThreePillars_strengthActive", // { order:[keys], sets:{key:number}, repsStack:{key:number[]} }
+      STRENGTH_STABILITY: "kbThreePillars_strengthStability" // { value:number } 0..6
     };
 
     const todayKey = () => {
@@ -417,7 +418,17 @@ const beep = (freq=880, dur=0.09, vol=0.08) => {
 
       // ===== Strength state (persisted) =====
       const [strengthOrder, setStrengthOrder] = useState(BIG_SIX.map(x=>x.key));
-      const [strengthSets, setStrengthSets] = useState(Object.fromEntries(BIG_SIX.map(x=>[x.key, 0])));
+      const [strengthRepsStack, setStrengthRepsStack] = useState(Object.fromEntries(BIG_SIX.map(x=>[x.key, []]))); // per lift: [reps,reps,...]
+      const strengthSets = useMemo(() => {
+        const out = {};
+        for(const x of BIG_SIX){
+          out[x.key] = (strengthRepsStack?.[x.key]?.length) || 0;
+        }
+        return out;
+      }, [strengthRepsStack]);
+
+      // Stability counter (buffered 0..6)
+      const [stability, setStability] = useState(0);
 
       // ===== Hellfire state =====
       const [level, setLevel] = useState("beginner");
@@ -465,13 +476,40 @@ const beep = (freq=880, dur=0.09, vol=0.08) => {
               const valid = s.order.filter(k => BIG_SIX.some(x=>x.key===k));
               if(valid.length === BIG_SIX.length) setStrengthOrder(valid);
             }
-            if(s?.sets && typeof s.sets === "object"){
-              const nextSets = Object.fromEntries(BIG_SIX.map(x=>[x.key, 0]));
-              for(const k of Object.keys(nextSets)){
-                if(Number.isFinite(s.sets[k])) nextSets[k] = Math.max(0, Math.floor(s.sets[k]));
+            // repsStack (preferred)
+            if(s?.repsStack && typeof s.repsStack === "object"){
+              const next = Object.fromEntries(BIG_SIX.map(x=>[x.key, []]));
+              for(const k of Object.keys(next)){
+                const arr = s.repsStack?.[k];
+                if(Array.isArray(arr)){
+                  next[k] = arr
+                    .map(v => Number(v))
+                    .filter(v => Number.isFinite(v) && v>=1 && v<=5)
+                    .map(v => Math.round(v));
+                }
               }
-              setStrengthSets(nextSets);
+              setStrengthRepsStack(next);
+            }else if(s?.sets && typeof s.sets === "object"){
+              // Backward compatibility: migrate old set counters to 5-rep stacks.
+              const next = Object.fromEntries(BIG_SIX.map(x=>[x.key, []]));
+              for(const k of Object.keys(next)){
+                const n = Number(s.sets?.[k]);
+                if(Number.isFinite(n) && n>0){
+                  next[k] = Array.from({length: Math.max(0, Math.floor(n))}, ()=>5);
+                }
+              }
+              setStrengthRepsStack(next);
             }
+          }catch(e){}
+        }
+
+        // Stability restore
+        const stRaw = localStorage.getItem(LS.STRENGTH_STABILITY);
+        if(stRaw){
+          try{
+            const obj = JSON.parse(stRaw);
+            const v = Number(obj?.value);
+            if(Number.isFinite(v)) setStability(Math.max(0, Math.min(6, Math.floor(v))));
           }catch(e){}
         }
 
@@ -520,8 +558,13 @@ const beep = (freq=880, dur=0.09, vol=0.08) => {
 
       // Persist Strength active
       useEffect(()=>{
-        localStorage.setItem(LS.STRENGTH_ACTIVE, JSON.stringify({ order: strengthOrder, sets: strengthSets }));
-      }, [strengthOrder, strengthSets]);
+        localStorage.setItem(LS.STRENGTH_ACTIVE, JSON.stringify({ order: strengthOrder, sets: strengthSets, repsStack: strengthRepsStack }));
+      }, [strengthOrder, strengthSets, strengthRepsStack]);
+
+      // Persist stability
+      useEffect(()=>{
+        localStorage.setItem(LS.STRENGTH_STABILITY, JSON.stringify({ value: stability }));
+      }, [stability]);
 
       // Sync suggested (tab-to-tab)
       useEffect(()=>{
@@ -554,6 +597,7 @@ const beep = (freq=880, dur=0.09, vol=0.08) => {
           localStorage.removeItem(LS.ACTIVE);
         }
       }, [workout, level, totalSU, hfGeneratedSU, hfTime, hfTimerRunning]);
+
 
       // ===== Flow timer effect (segment 3 countdown) =====
       useEffect(()=>{
@@ -687,13 +731,54 @@ const beep = (freq=880, dur=0.09, vol=0.08) => {
        * Strength actions
        **********************/
       const shuffleStrength = () => setStrengthOrder(prev => shuffleArray(prev));
-      const resetStrength = () => setStrengthSets(Object.fromEntries(BIG_SIX.map(x=>[x.key, 0])));
-      const incSet = (key) => setStrengthSets(prev => ({...prev, [key]: (prev[key]||0) + 1}));
-      const decSet = (key) => setStrengthSets(prev => ({...prev, [key]: Math.max(0, (prev[key]||0) - 1)}));
+      const resetStrength = () => {
+        setStrengthRepsStack(Object.fromEntries(BIG_SIX.map(x=>[x.key, []])));
+      };
+      const addRepSet = (key, reps=5) => {
+        const r = Math.max(1, Math.min(5, Math.round(Number(reps) || 5)));
+        setStrengthRepsStack(prev => {
+          const next = { ...prev };
+          const arr = Array.isArray(next[key]) ? [...next[key]] : [];
+          arr.push(r);
+          next[key] = arr;
+          return next;
+        });
+      };
+      const removeLastSet = (key) => {
+        setStrengthRepsStack(prev => {
+          const next = { ...prev };
+          const arr = Array.isArray(next[key]) ? [...next[key]] : [];
+          arr.pop();
+          next[key] = arr;
+          return next;
+        });
+      };
+
+      const isStrengthSessionClean = (orderedLifts) => {
+        // Clean = every logged set is exactly 5 reps, for every lift.
+        for(const l of orderedLifts){
+          const stack = strengthRepsStack?.[l.key] || [];
+          if(!stack.length) return false;
+          if(stack.some(r => Number(r) !== 5)) return false;
+        }
+        return true;
+      };
       const completeStrength = () => {
+        const ordered = strengthOrder.map(k => BIG_SIX.find(x => x.key === k)).filter(Boolean);
+        const clean = isStrengthSessionClean(ordered);
+
+        // Buffered stability rule:
+        // - clean: +1 up to 6
+        // - miss: if <3 => 0, else => 3
+        setStability(prev => {
+          const p = Math.max(0, Math.min(6, Math.floor(prev || 0)));
+          if(clean) return Math.min(6, p + 1);
+          return (p >= 3) ? 3 : 0;
+        });
+
         markCompleted("strength");
         setSuggested(getSuggestedMode());
-        alert("Strength afgerond.");
+        alert(clean ? "Strength afgerond (clean 5-rep sessie)." : "Strength afgerond (niet-clean: niet alle sets waren 5 reps)." );
       };
 
       /**********************
@@ -799,9 +884,7 @@ const beep = (freq=880, dur=0.09, vol=0.08) => {
             pattern,
             reps,
             su: suForExercise,
-            formattedReps: exercise.unilateral
-              ? `${reps} reps (${Math.ceil(reps/2)} per arm)`
-              : `${reps} reps`
+            formattedReps: exercise.unilateral ? (reps + " reps (" + Math.ceil(reps/2) + " per arm)") : (reps + " reps")
           });
         });
 
@@ -827,9 +910,7 @@ const beep = (freq=880, dur=0.09, vol=0.08) => {
             pattern,
             reps,
             su: suForExercise,
-            formattedReps: exercise.unilateral
-              ? `${reps} reps (${Math.ceil(reps/2)} per arm)`
-              : `${reps} reps`
+            formattedReps: exercise.unilateral ? (reps + " reps (" + Math.ceil(reps/2) + " per arm)") : (reps + " reps")
           });
         }
 
@@ -973,12 +1054,19 @@ const beep = (freq=880, dur=0.09, vol=0.08) => {
         const minSets = 3;
         const targetSets = 5;
         const ready = ordered.every(l => (strengthSets[l.key] || 0) >= minSets);
+        const cleanNow = ordered.every(l => {
+          const stack = strengthRepsStack?.[l.key] || [];
+          return stack.length >= minSets && stack.every(r => Number(r) === 5);
+        });
+        const nudge = stability >= 6;
         return (
           <div className="sectionBody">
             <div className="row" style={{justifyContent:"flex-start"}}>
               <button className="btn primary" onClick={shuffleStrength}>Shuffle</button>
               <button className="btn" onClick={resetStrength}>Reset</button>
               <button className={"btn " + (ready ? "primary" : "")} onClick={completeStrength} title={"Complete (minimaal " + minSets + " sets per lift)"}>Complete</button>
+              <span className="pill">stabiliteit: <b>{stability}</b>/6</span>
+              {nudge ? <span className="pill" title="Subtiele nudge — het is een keuze">🟢 mastered • overweeg +4 kg wave</span> : (cleanNow ? <span className="pill">clean 5s</span> : <span className="pill">—</span>)}
             </div>
 
             <ul className="list">
@@ -987,15 +1075,20 @@ const beep = (freq=880, dur=0.09, vol=0.08) => {
                   <div>
                     <div style={{fontWeight:900}}>{idx+1}. {l.name}</div>
                     <div className="small">{l.target}</div>
+                    <div className="small" style={{marginTop:6}}>
+                      sets: <b>{strengthSets[l.key] || 0}</b> • laatste reps: <b>{(strengthRepsStack?.[l.key]?.length ? strengthRepsStack[l.key][strengthRepsStack[l.key].length-1] : "—")}</b>
+                    </div>
                   </div>
                   <div className="right">
                     <div className="row" style={{justifyContent:"flex-end"}}>
-                      <button className="btn" onClick={()=>decSet(l.key)}>-</button>
-                      <button className="btn primary" onClick={()=>incSet(l.key)}>+ set</button>
+                      <button className="btn" onClick={()=>removeLastSet(l.key)} title="Verwijder laatste set">-</button>
+                      <button className="btn" onClick={()=>addRepSet(l.key, 3)}>+3</button>
+                      <button className="btn" onClick={()=>addRepSet(l.key, 4)}>+4</button>
+                      <button className="btn primary" onClick={()=>addRepSet(l.key, 5)}>+5</button>
                     </div>
-                    <div className="small">sets: <b>{strengthSets[l.key] || 0}</b> / {targetSets}</div>
+                    <div className="small">doel: <b>{targetSets}</b> sets (indicatie)</div>
                     <div className="barWrap" aria-hidden="true" style={{marginTop:6, marginLeft:"auto"}}>
-                      <div className="barFill" style={{width: (Math.min(1, (strengthSets[l.key]||0)/targetSets)*100) + "%"}}></div>
+                      <div className="barFill" style={{width: ((Math.min(1, (strengthSets[l.key]||0)/targetSets)*100)) + "%"}}></div>
                     </div>
                   </div>
                 </li>
@@ -1151,8 +1244,7 @@ const beep = (freq=880, dur=0.09, vol=0.08) => {
             Generated: <b>{hfGeneratedSU}</b> / {totalSU} SU
           </div>
 
-          {workout.length > 0 ? (
-
+{workout.length > 0 ? (
             <>
               <ul className="list" style={{marginTop:12}}>
                 {workout.map((ex, idx) => (
@@ -1161,7 +1253,6 @@ const beep = (freq=880, dur=0.09, vol=0.08) => {
                       <div style={{fontWeight:900}}>{idx+1}. {ex.name}</div>
                       <div className="small">
                         <b>{ex.unilateral ? `${ex.reps} reps (${Math.ceil(ex.reps/2)} per arm)` : `${ex.reps} reps`}</b>
-                        {ex.su ? <span className="small"> • {ex.su} SU</span> : null}
                       </div>
                       {ex.video ? (
                         <div style={{marginTop:8}}>
